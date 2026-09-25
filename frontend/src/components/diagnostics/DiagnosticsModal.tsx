@@ -90,9 +90,17 @@ export function DiagnosticsModal({
         ) : (
           <DoctorList
             checks={checks}
-            onCopy={async (fix) => onToast((await copyText(fix)) ? 'Copied' : 'Could not copy')}
-            onFix={(c) => void onInstall(c.action === 'install_components' ? 'default,deno' : 'default')}
-            busyAction={installBusy ? 'x' : null}
+            onCopy={async (fix) =>
+              onToast((await copyText(fix)) ? 'Copied' : 'Could not copy')
+            }
+            onFix={(c) =>
+              void onInstall(
+                c.action === 'install_components'
+                  ? 'default,deno'
+                  : 'default',
+              )
+            }
+            busyAction={installBusy ? 'installing' : null}
           />
         )}
 

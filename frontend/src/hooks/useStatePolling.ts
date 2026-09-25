@@ -20,6 +20,7 @@ export const HIDDEN_INTERVAL_MS = 4000
 
 export function useStatePolling() {
   const rev = useRef(-1)
+  const requestId = useRef(0)
   const pollNow = useRef<() => Promise<void>>(async () => {})
   const [state, setState] = useState<StateResponse>(EMPTY)
   const [online, setOnline] = useState(true)
@@ -29,15 +30,17 @@ export function useStatePolling() {
     let timer: number | undefined
 
     const poll = async () => {
+      const id = ++requestId.current
+
       try {
         const next = await getState(rev.current)
-        if (stopped) return
+        if (stopped || id !== requestId.current) return
         rev.current = next.rev
         // The backend only sends "files" when they changed, so keep the previous list otherwise.
         setState((prev) => ({ ...prev, ...next, files: next.files ?? prev.files }))
         setOnline(true)
       } catch {
-        if (!stopped) setOnline(false)
+        if (!stopped && id === requestId.current) setOnline(false)
       }
     }
     pollNow.current = poll
@@ -60,6 +63,7 @@ export function useStatePolling() {
   /** Also re-scan the download folder for files changed outside the app. */
   const refreshFiles = useCallback(() => {
     rev.current = -1
+    requestId.current++
     return pollNow.current()
   }, [])
 

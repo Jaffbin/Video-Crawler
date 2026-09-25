@@ -3,7 +3,7 @@ import { useCallback, useRef, useState } from 'react'
 import { createJobs, probe } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
 import { useUrlImport } from '../../hooks/useUrlImport'
-import { BITRATES, QUALITIES, loadOptions, saveOptions } from '../../lib/options'
+import { BITRATES, loadOptions, saveOptions } from '../../lib/options'
 import { extractUrls, looksLikeTextFile, mergeUrls, readUrls } from '../../lib/urls'
 import type { DownloadOptions, ProbeResult } from '../../types/api'
 import { Button } from '../ui/Button'
@@ -72,6 +72,9 @@ export function NewDownloadPanel({ playwright, onToast, onAdded }: Props) {
   const { dragging } = useUrlImport({ onUrls: addUrls, onProblem: (m) => onToast(m, true) })
   const links = readUrls(urls)
   const mp3 = options.mode === 'mp3'
+  const availableHeights = [...new Set(probeResult?.heights ?? [])]
+    .filter((height) => Number.isFinite(height) && height > 0)
+    .sort((a, b) => b - a)
 
   async function readClipboard() {
     try {
@@ -185,7 +188,15 @@ export function NewDownloadPanel({ playwright, onToast, onAdded }: Props) {
         <ProbeCard
           probe={probeResult}
           quality={options.quality}
-          onPickQuality={(quality) => patch({ mode: 'mp4', quality })}
+          onPickQuality={(quality) => {
+            if (options.mode !== 'mp4') {
+              patch({ mode: 'mp4', quality })
+              onToast('Switched to MP4 to use video quality')
+              return
+            }
+
+            patch({ quality })
+          }}
         />
       )}
 
@@ -204,7 +215,7 @@ export function NewDownloadPanel({ playwright, onToast, onAdded }: Props) {
         </div>
         {mp3 ? (
           <label className="control">
-            <span>Audio quality</span>
+            <span>Output bitrate</span>
             <select
               className="field"
               value={options.abr}
@@ -219,22 +230,44 @@ export function NewDownloadPanel({ playwright, onToast, onAdded }: Props) {
           </label>
         ) : (
           <label className="control">
-            <span>Highest video quality</span>
+            <span>Maximum video quality</span>
+
             <select
               className="field"
               value={options.quality}
               onChange={(e) => patch({ quality: e.target.value })}
             >
               <option value="best">Best available</option>
-              {QUALITIES.map((q) => (
-                <option key={q} value={String(q)}>
-                  {q}p
+
+              {availableHeights.map((height) => (
+                <option key={height} value={String(height)}>
+                  {height}p
                 </option>
               ))}
-              {options.quality !== 'best' && !QUALITIES.includes(Number(options.quality)) && (
-                <option value={options.quality}>{options.quality}p</option>
+
+              {!probeResult && (
+                <>
+                  <option value="2160">2160p</option>
+                  <option value="1440">1440p</option>
+                  <option value="1080">1080p</option>
+                  <option value="720">720p</option>
+                  <option value="480">480p</option>
+                  <option value="360">360p</option>
+                </>
               )}
             </select>
+
+            {probeResult && availableHeights.length > 0 && (
+              <span className="text-[11px] text-zinc-500">
+                {availableHeights.length} resolutions detected
+              </span>
+            )}
+
+            {!probeResult && (
+              <span className="text-[11px] text-zinc-500">
+                Analyze the link to see available resolutions
+              </span>
+            )}
           </label>
         )}
       </div>

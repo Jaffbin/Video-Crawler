@@ -39,7 +39,7 @@ export function DoctorList({ checks, onCopy, onFix, busyAction }: Props) {
                     disabled={busyAction !== null}
                     onClick={() => onFix(c)}
                   >
-                    {busyAction === c.id ? 'Installing…' : 'Install now'}
+                    {busyAction === 'installing' ? 'Installing…' : 'Install now'}
                   </button>
                 )}
               </div>

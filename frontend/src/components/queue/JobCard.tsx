@@ -52,6 +52,7 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
       }
     }
     void load()
+    if (job.status !== 'running' && job.status !== 'queued') return
     const timer = window.setInterval(load, 1500)
     return () => {
       stop = true
@@ -69,12 +70,26 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
     }
   }
 
+  function formatItemProgress(item: string, running: boolean): string {
+    if (!item) return ''
+
+    const [current, total] = item.split('/')
+
+    if (!total) {
+      return running ? `Item ${current}` : `${current} items`
+    }
+
+    return running
+      ? `Item ${current}/${total}`
+      : `${total} items`
+  }
+
   const report = (e: unknown) => onToast(e instanceof Error ? e.message : 'Could not open it', true)
   const meta = [
     job.status === 'running' ? job.stage : '',
     job.status === 'queued' ? 'Waiting in the queue' : '',
     job.stage === 'Last incomplete' ? 'Interrupted last time' : '',
-    job.item ? (job.status === 'running' ? `Item ${job.item}` : `${job.item.split('/')[1]} items`) : '',
+    formatItemProgress(job.item, job.status === 'running'),
     job.speed,
     job.eta ? `${job.eta} left` : '',
     !active && job.finished ? formatDate(job.finished) : '',

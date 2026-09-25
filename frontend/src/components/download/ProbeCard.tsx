@@ -28,7 +28,7 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
     <div className="overflow-hidden rounded-2xl border border-white/8 bg-white/[.025]">
       <div className="flex gap-4 p-4">
         {probe.thumbnail ? (
-          <img
+          <img 
             src={probe.thumbnail}
             alt=""
             referrerPolicy="no-referrer"
@@ -53,13 +53,25 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
       </div>
 
       {probe.items && probe.items.length > 0 && (
-        <ul className="space-y-0.5 border-t border-white/8 px-4 py-3 text-xs text-zinc-400">
-          {probe.items.map((title, i) => (
-            <li key={`${i}-${title}`} className="truncate">
-              {i + 1}. {title}
-            </li>
-          ))}
-        </ul>
+        <div className="border-t border-white/8 px-4 py-3">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-400">
+            Playlist preview
+          </div>
+
+          <ul className="max-h-40 space-y-0.5 overflow-auto text-xs text-zinc-400">
+            {probe.items.slice(0, 10).map((title, i) => (
+              <li key={`${i}-${title}`} className="truncate">
+                {i + 1}. {title}
+              </li>
+            ))}
+          </ul>
+
+          {probe.items.length > 10 && (
+            <p className="mt-2 text-xs text-zinc-500">
+              +{probe.items.length - 10} more items
+            </p>
+          )}
+        </div>
       )}
 
       {probe.heights && probe.heights.length > 0 && (
@@ -76,9 +88,8 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
                   type="button"
                   aria-pressed={selected}
                   onClick={() => onPickQuality(String(h))}
-                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
-                    selected ? 'bg-white text-black' : 'bg-white/[.06] text-zinc-300 hover:bg-white/[.1]'
-                  }`}
+                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${selected ? 'bg-white text-black' : 'bg-white/[.06] text-zinc-300 hover:bg-white/[.1]'
+                    }`}
                 >
                   {selected && <Check aria-hidden size={12} />} {h}p
                 </button>
@@ -90,19 +101,11 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
 
       {probe.sources && probe.sources.length > 0 && (
         <div className="border-t border-white/8 px-4 py-3 text-xs text-zinc-400">
-          <p>
             {probe.count ?? probe.sources.length} media source
-            {(probe.count ?? probe.sources.length) > 1 ? 's' : ''} found
-            {probe.rendered ? ' by rendering the page in a headless browser' : ' in the page source'}. They
-            are tried one by one.
-          </p>
-          <ul className="mt-2 space-y-0.5 font-mono">
-            {probe.sources.slice(0, 5).map((s) => (
-              <li key={s} className="truncate" title={s}>
-                {s}
-              </li>
-            ))}
-          </ul>
+            {(probe.count ?? probe.sources.length) > 1 ? 's' : ''} detected
+            {probe.rendered
+              ? ' using page rendering.'
+              : '.'}
         </div>
       )}
     </div>

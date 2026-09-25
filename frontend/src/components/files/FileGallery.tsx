@@ -88,6 +88,12 @@ export function FileGallery({ files, windowMode, onRefresh, onToast }: Props) {
                   <Play aria-hidden size={13} /> Play
                 </a>
               )}
+              <a className="action-btn" href={fileUrl(f.path)} download={f.name}>
+                 Download
+              </a>
+
+
+
               <button
                 type="button"
                 className="action-btn"

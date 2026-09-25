@@ -70,11 +70,6 @@ export default function App() {
 
   const jobs = useMemo(() => state.jobs, [state.jobs])
 
-  useEffect(() => {
-    if (online) return
-    const id = window.setInterval(() => void refresh(), 2000)
-    return () => window.clearInterval(id)
-  }, [online, refresh])
 
   return (
     <div className="min-h-screen pb-16">
