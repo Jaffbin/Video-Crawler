@@ -104,7 +104,7 @@ export function QueuePanel({ jobs, windowMode, onChanged, onToast }: Props) {
 
       {jobs.length === 0 ? (
         <p className="rounded-xl bg-white/[.025] px-4 py-8 text-center text-sm text-zinc-400">
-          The queue is empty. Paste a link on the left and press Start download.
+          The queue is empty. Open New download to add a link.
         </p>
       ) : shown.length === 0 ? (
         <p className="rounded-xl bg-white/[.025] px-4 py-8 text-center text-sm text-zinc-400">

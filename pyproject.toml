@@ -9,7 +9,7 @@ description = "A private local video and audio downloader powered by yt-dlp and 
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "yt-dlp[default,deno]",
+  "yt-dlp[curl-cffi,default,deno]",
 ]
 
 [project.optional-dependencies]
@@ -18,7 +18,7 @@ render = ["playwright"]
 dev = ["pytest>=8,<10", "ruff>=0.14,<1"]
 
 [tool.setuptools]
-py-modules = ["grab", "grab_config", "grab_models", "grab_state", "grab_storage", "webui"]
+py-modules = ["grab", "grab_config", "grab_models", "grab_sites", "grab_state", "grab_storage", "webui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "platform": "windows-x64",
+  "python": {
+    "version": "3.14.7",
+    "url": "https://www.python.org/ftp/python/3.14.7/python-3.14.7-embed-amd64.zip",
+    "sha256": "d297e5ff019966817ad8502465176139f2d3d840fa4ed84b13bed399a6ab1f15"
+  },
+  "python_packages": {
+    "yt_dlp": "yt-dlp[curl-cffi,default]",
+    "desktop": "pywebview>=6.2,<7",
+    "playwright": "playwright"
+  },
+  "components": {
+    "ffmpeg": {
+      "repository": "yt-dlp/FFmpeg-Builds",
+      "asset": "ffmpeg-master-latest-win64-gpl.zip",
+      "executable": "ffmpeg.exe"
+    },
+    "deno": {
+      "repository": "denoland/deno",
+      "asset": "deno-x86_64-pc-windows-msvc.zip",
+      "executable": "deno.exe"
+    }
+  }
+}

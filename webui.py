@@ -87,6 +87,8 @@ NOTE_RULES = [
      "YouTube challenge solving failed, so some formats may be missing. Install Deno and yt-dlp-ejs from the Diagnostics panel."),
     (("cookies are no longer valid", "likely been rotated"), "rotated",
      "YouTube rotated or expired your cookies. Export a fresh cookies.txt from a private window and upload it again."),
+    (("attempting impersonation", "no impersonate target"), "impersonation",
+     "This site may require browser impersonation. Install the recommended yt-dlp components from Diagnostics."),
 ]
 
 PP_LABEL = {
@@ -165,6 +167,9 @@ def friendly_error(msg: str) -> str:
         return ("Cannot reach the site. Check your network, VPN or proxy (Advanced Settings > Proxy), "
                 f"or open Diagnostics > Test network. (Details: {m[:140]})")
     if "http error 403" in low or "http error 401" in low:
+        if importlib.util.find_spec("curl_cffi") is None:
+            return ("Server denied access and browser impersonation support is missing. "
+                    "Open Diagnostics and install the recommended yt-dlp components, then retry.")
         return "Server denied access. You can fill in Referer in 'Advanced Settings' or use cookies."
     if "http error 404" in low:
         return "Link has expired (404)."
@@ -592,8 +597,14 @@ def start_update(extras: str = "default") -> tuple[bool, str]:
 
 
 def _do_update(extras: str = "default") -> None:
-    # "default" adds yt-dlp-ejs (YouTube challenge solver); "deno" adds the Deno JavaScript runtime
-    cmd = [sys.executable, "-m", "pip", "install", "-U", "--disable-pip-version-check", f"yt-dlp[{extras}]"]
+    # curl-cffi enables yt-dlp's browser impersonation for Iwara and anti-bot protected sites.
+    selected = {item for item in extras.split(",") if item in {"default", "deno"}}
+    selected.update({"curl-cffi", "default"})
+    package = f"yt-dlp[{','.join(sorted(selected))}]"
+    cmd = [sys.executable, "-m", "pip", "install", "-U", "--disable-pip-version-check", package]
+    if os.environ.get("VIDEO_GRABBER_PORTABLE_ROOT"):
+        package_dir = Path(sys.executable).resolve().parent / "Lib" / "site-packages"
+        cmd[-1:-1] = ["--ignore-installed", "--target", str(package_dir)]
     kw: dict = {}
     if sys.platform.startswith("win"):
         kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
@@ -2136,13 +2147,31 @@ setInterval(() => { if (!document.hidden) poll(); }, 1000);
 # ───────────────────────── Entry Point ─────────────────────────
 def open_native_window(url: str) -> bool:
     """Try to open url in its own pywebview window. Returns False if pywebview is not installed
-    (the caller then falls back to a browser tab). Blocks until the window is closed."""
+    or WebView2 cannot start (the caller then falls back to a browser tab). Blocks until the
+    window is closed."""
     try:
         import webview
     except ImportError:
         return False
-    webview.create_window("Video Grabber", url, width=1180, height=860, min_size=(760, 560))
-    webview.start()
+    try:
+        # External documentation links use target=_blank and must leave the trusted local app
+        # surface instead of navigating this window away from its token-protected origin.
+        webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        storage_path = CONFIG_DIR / "webview"
+        storage_path.mkdir(parents=True, exist_ok=True)
+        webview.create_window(
+            "Video Grabber", url, width=1180, height=860, min_size=(680, 520),
+            background_color="#0b0d10", text_select=True,
+        )
+        start_options = {"private_mode": False, "storage_path": str(storage_path)}
+        if sys.platform == "win32":
+            start_options["gui"] = "edgechromium"
+        webview.start(**start_options)
+    except Exception as exc:  # noqa: BLE001 - GUI/runtime failures must retain the browser fallback
+        print(f"Could not start the native app window: {exc}")
+        if sys.platform == "win32":
+            print("Install or repair Microsoft Edge WebView2 Runtime, or start with --ui browser.")
+        return False
     return True
 
 

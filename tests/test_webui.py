@@ -3,9 +3,11 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import urllib.error
 import urllib.request
+import types
 from pathlib import Path
 
 import pytest
@@ -54,6 +56,41 @@ def call(base, path, body=None, *, token=True, host=None, ctype="application/jso
     except urllib.error.HTTPError as e:
         raw = e.read()
         return e.code, (json.loads(raw) if raw[:1] in b"{[" else raw)
+
+
+def test_native_window_uses_webview2_and_persistent_app_storage(monkeypatch, tmp_path):
+    seen = {}
+    fake = types.SimpleNamespace(settings={})
+
+    def create_window(*args, **kwargs):
+        seen["window"] = (args, kwargs)
+
+    def start(**kwargs):
+        seen["start"] = kwargs
+
+    fake.create_window = create_window
+    fake.start = start
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    monkeypatch.setattr(webui, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(webui.sys, "platform", "win32")
+
+    assert webui.open_native_window("http://127.0.0.1:8765/")
+    assert seen["window"][0][1] == "http://127.0.0.1:8765/"
+    assert seen["start"]["gui"] == "edgechromium"
+    assert seen["start"]["private_mode"] is False
+    assert seen["start"]["storage_path"] == str(tmp_path / "webview")
+    assert fake.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is True
+
+
+def test_native_window_failure_keeps_browser_fallback(monkeypatch, tmp_path):
+    fake = types.SimpleNamespace(
+        settings={},
+        create_window=lambda *args, **kwargs: None,
+        start=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("WebView2 unavailable")),
+    )
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    monkeypatch.setattr(webui, "CONFIG_DIR", tmp_path)
+    assert webui.open_native_window("http://127.0.0.1:8765/") is False
 
 
 # ───────────────────────── URL extraction (the regression that was found in review) ─────────────────────────
@@ -278,7 +315,30 @@ class FakeProc:
 def test_update_installs_the_right_extras(monkeypatch, extras):
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: FakeProc(cmd))
     webui._do_update(extras)
-    assert FakeProc.cmd[-1] == f"yt-dlp[{extras}]" and FakeProc.cmd[1:3] == ["-m", "pip"]
+    expected = "yt-dlp[curl-cffi,default,deno]" if "deno" in extras else "yt-dlp[curl-cffi,default]"
+    assert FakeProc.cmd[-1] == expected and FakeProc.cmd[1:3] == ["-m", "pip"]
+
+
+def test_portable_update_targets_embedded_site_packages(monkeypatch, tmp_path):
+    class FakeProc:
+        stdout = iter(())
+        cmd = []
+
+        def __init__(self, cmd, **kwargs):
+            type(self).cmd = cmd
+
+        def wait(self): return 0
+
+    python_dir = tmp_path / "python"
+    python_dir.mkdir()
+    executable = python_dir / "python.exe"
+    executable.write_bytes(b"")
+    monkeypatch.setenv("VIDEO_GRABBER_PORTABLE_ROOT", str(tmp_path))
+    monkeypatch.setattr(webui.sys, "executable", str(executable))
+    monkeypatch.setattr(webui.subprocess, "Popen", FakeProc)
+    webui._do_update("default")
+    assert "--ignore-installed" in FakeProc.cmd
+    assert FakeProc.cmd[FakeProc.cmd.index("--target") + 1] == str(python_dir / "Lib" / "site-packages")
     assert webui.UPDATE["status"] == "done"
 
 

@@ -41,6 +41,8 @@ function mockApi(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 beforeEach(() => {
+  window.location.hash = ''
+  localStorage.clear()
   document.head.insertAdjacentHTML('beforeend', '<meta name="grab-token" content="test-token">')
   resetTokenCache()
 })
@@ -55,8 +57,22 @@ describe('App', () => {
   it('shows the yt-dlp version once the first state poll resolves', async () => {
     mockApi()
     render(<App />)
-    await waitFor(() => expect(screen.getByText(/2026\.09\.20/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText(/2026\.09\.20/).length).toBeGreaterThan(0))
     expect(screen.getByText(/local service connected/i)).toBeInTheDocument()
+  })
+
+  it('shows one workflow at a time and navigates with the sidebar', async () => {
+    mockApi()
+    const user = (await import('@testing-library/user-event')).default.setup()
+    render(<App />)
+
+    expect(await screen.findByRole('textbox', { name: /links to download/i })).toBeInTheDocument()
+    const queueLinks = screen.getAllByRole('button', { name: 'Queue' })
+    await user.click(queueLinks[0])
+
+    expect(await screen.findByRole('heading', { name: /downloads/i })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: /links to download/i })).not.toBeInTheDocument()
+    expect(window.location.hash).toBe('#/queue')
   })
 
   it('sends every request with the token, never as a query string on the API calls', async () => {

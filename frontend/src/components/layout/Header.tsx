@@ -4,9 +4,10 @@ import { Button } from '../ui/Button'
 export type NotificationMode = 'server' | 'default' | 'granted' | 'denied' | 'unsupported'
 
 interface Props {
+  title: string
+  description: string
   version: string
   online: boolean
-  windowMode: boolean
   updateAttention: boolean
   environmentAttention: boolean
   notification: NotificationMode
@@ -26,39 +27,42 @@ export function Header(p: Props) {
     <header className="sticky top-0 z-30 border-b border-white/[.06] bg-[#0b0d10]/85 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
-          <div
-            aria-hidden
-            className="grid size-9 shrink-0 place-items-center rounded-xl bg-white font-black text-black"
-          >
-            ↓
-          </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="truncate text-sm font-semibold">Video Grabber</h1>
-              <span className="hidden rounded-md bg-white/[.06] px-1.5 py-0.5 font-mono text-xs text-zinc-400 sm:inline">
-                yt-dlp {p.version}
-              </span>
+              <h1 className="truncate text-base font-semibold">{p.title}</h1>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+            <div className="truncate text-xs text-zinc-400">{p.description}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-zinc-500 md:hidden">
               <i
                 aria-hidden
                 className={`size-1.5 rounded-full ${p.online ? 'bg-emerald-400' : 'bg-red-400'}`}
               />
-              {p.online ? 'Local service connected' : 'Reconnecting…'}
+              {p.online ? `Local service connected · yt-dlp ${p.version}` : 'Reconnecting…'}
             </div>
           </div>
         </div>
 
         <nav aria-label="Tools" className="flex items-center gap-1.5">
-          <Button variant="ghost" onClick={p.onDoctor} aria-label="Diagnostics" className="relative">
+          <Button
+            variant="ghost"
+            onClick={p.onDoctor}
+            aria-label="Diagnostics"
+            className="relative md:hidden"
+          >
             <Stethoscope size={16} />
-            <span className="hidden lg:inline">Diagnostics</span>
             {p.environmentAttention && <Dot />}
           </Button>
-          <Button variant="ghost" onClick={p.onUpdate} aria-label="Updates" className="relative">
+          <Button variant="ghost" onClick={p.onUpdate} aria-label="Updates" className="relative md:hidden">
             <RefreshCw size={16} />
-            <span className="hidden lg:inline">Update</span>
             {p.updateAttention && <Dot />}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={p.onOpenFolder}
+            aria-label="Open download folder"
+            className="md:hidden"
+          >
+            <FolderOpen size={16} />
           </Button>
           {p.notification !== 'server' && p.notification !== 'unsupported' && (
             <Button
@@ -72,10 +76,6 @@ export function Header(p: Props) {
               <span className="hidden lg:inline">{notifyLabel}</span>
             </Button>
           )}
-          <Button variant="ghost" onClick={p.onOpenFolder} aria-label="Open download folder">
-            <FolderOpen size={16} />
-            <span className="hidden xl:inline">Downloads</span>
-          </Button>
         </nav>
       </div>
     </header>

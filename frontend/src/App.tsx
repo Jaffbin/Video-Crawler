@@ -3,6 +3,7 @@ import { loadOptions, saveOptions } from './lib/options'
 import { getUpdateStatus, openFolder, startYtdlpUpdate } from './api/client'
 import { Banners } from './components/layout/Banners'
 import { Header, type NotificationMode } from './components/layout/Header'
+import { Sidebar } from './components/layout/Sidebar'
 import { RestartOverlay } from './components/layout/RestartOverlay'
 import { NewDownloadPanel } from './components/download/NewDownloadPanel'
 import { QueuePanel } from './components/queue/QueuePanel'
@@ -17,6 +18,7 @@ import { useEnvironment } from './hooks/useEnvironment'
 import { useRestart } from './hooks/useRestart'
 import { useSubscriptions } from './hooks/useSubscriptions'
 import { useToasts } from './hooks/useToasts'
+import { useNavigation, type AppView } from './hooks/useNavigation'
 import type { ComponentExtras, DownloadOptions, YtdlpCheck } from './types/api'
 
 function useNotificationMode(serverNotifies: boolean): [NotificationMode, () => void] {
@@ -53,6 +55,7 @@ export default function App() {
   const [updateOpen, setUpdateOpen] = useState(false)
   const [installBusy, setInstallBusy] = useState(false)
   const [ytdlpCheck, setYtdlpCheck] = useState<YtdlpCheck | null>(null)
+  const { view, navigate } = useNavigation()
 
   useCompletionNotifier(state.jobs, {
     serverNotifies: !!state.desktop_notifications,
@@ -82,21 +85,48 @@ export default function App() {
   }
 
   const jobs = useMemo(() => state.jobs, [state.jobs])
+  const activeJobs = jobs.filter((job) => job.status === 'queued' || job.status === 'running').length
+  const failedJobs = jobs.filter((job) => job.status === 'error' || job.status === 'canceled').length
+  const viewCopy: Record<AppView, { title: string; description: string }> = {
+    new: { title: 'New download', description: 'Add one or more video, playlist, MP4 or M3U8 links.' },
+    queue: { title: 'Queue', description: 'Track active jobs and review completed or failed downloads.' },
+    'auto-download': {
+      title: 'Auto-download',
+      description: 'Watch channels and playlists for newly published videos.',
+    },
+    library: { title: 'Library', description: 'Browse files saved in your download folder.' },
+  }
+
+  const openFolderFromUi = () =>
+    openFolder().catch((e) => toast(e instanceof Error ? e.message : 'Could not open the folder', true))
 
   return (
-    <div className="min-h-screen pb-16">
-      <Header
+    <div className="min-h-screen pb-24 md:pb-0 md:pl-60">
+      <Sidebar
+        view={view}
         version={state.version}
         online={online}
-        windowMode={!!state.window}
+        activeJobs={activeJobs}
+        failedJobs={failedJobs}
+        fileCount={state.files?.length ?? 0}
+        updateAttention={updateAttention}
+        environmentAttention={environment.showBanner}
+        onNavigate={navigate}
+        onDoctor={() => setDoctorOpen(true)}
+        onUpdate={() => setUpdateOpen(true)}
+        onOpenFolder={openFolderFromUi}
+      />
+      <Header
+        title={viewCopy[view].title}
+        description={viewCopy[view].description}
+        version={state.version}
+        online={online}
         updateAttention={updateAttention}
         environmentAttention={environment.showBanner}
         notification={notifyMode}
         onDoctor={() => setDoctorOpen(true)}
         onUpdate={() => setUpdateOpen(true)}
-        onOpenFolder={() =>
-          openFolder().catch((e) => toast(e instanceof Error ? e.message : 'Could not open the folder', true))
-        }
+        onOpenFolder={openFolderFromUi}
         onNotify={requestNotify}
       />
       <Banners
@@ -108,18 +138,22 @@ export default function App() {
         onDismissYoutubeIssues={environment.dismiss}
       />
 
-      <main className="mx-auto grid max-w-[1500px] gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[420px_1fr]">
-        <div className="lg:sticky lg:top-20 lg:self-start">
-          <NewDownloadPanel
-            options={options}
-            onOptionsChange={patchOptions}
-            playwright={state.playwright}
-            onToast={toast}
-            onAdded={refresh}
-          />
-        </div>
-        <div className="grid gap-5">
+      <main className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6">
+        {view === 'new' && (
+          <div className="max-w-3xl">
+            <NewDownloadPanel
+              options={options}
+              onOptionsChange={patchOptions}
+              playwright={state.playwright}
+              onToast={toast}
+              onAdded={refresh}
+            />
+          </div>
+        )}
+        {view === 'queue' && (
           <QueuePanel jobs={jobs} windowMode={!!state.window} onChanged={refresh} onToast={toast} />
+        )}
+        {view === 'auto-download' && (
           <SubscriptionsPanel
             options={options}
             subscriptions={subscriptions}
@@ -127,13 +161,15 @@ export default function App() {
             onChanged={refreshSubs}
             onToast={toast}
           />
+        )}
+        {view === 'library' && (
           <FileGallery
             files={state.files ?? []}
             windowMode={!!state.window}
             onRefresh={refreshFiles}
             onToast={toast}
           />
-        </div>
+        )}
       </main>
 
       <DiagnosticsModal

@@ -88,7 +88,7 @@ def test_diagnostics_flags_missing_ffmpeg_and_deno(monkeypatch, tmp_path):
     assert by_id["ffmpeg"]["status"] == "error"
     assert by_id["js_runtime"]["status"] == "warn"
     assert by_id["js_runtime"]["action"] == "install_components"
-    assert "yt-dlp[default,deno]" in by_id["js_runtime"]["fix"]
+    assert "yt-dlp[curl-cffi,default,deno]" in by_id["js_runtime"]["fix"]
     assert by_id["output_dir"]["status"] in ("ok", "warn")
 
 
@@ -101,12 +101,21 @@ def test_diagnostics_when_everything_is_present(monkeypatch, tmp_path):
     assert by_id["ejs"]["status"] == "ok"
 
 
+def test_diagnostics_offers_impersonation_support(monkeypatch, tmp_path):
+    real_find_spec = grab.importlib.util.find_spec
+    monkeypatch.setattr(grab.importlib.util, "find_spec",
+                        lambda name: None if name == "curl_cffi" else real_find_spec(name))
+    item = {c["id"]: c for c in grab.run_diagnostics(tmp_path)}["impersonation"]
+    assert item["status"] == "warn" and item["action"] == "install_default"
+    assert "curl-cffi" in item["fix"]
+
+
 def test_ejs_missing_with_deno_offers_the_smaller_fix(monkeypatch, tmp_path):
     monkeypatch.setattr(grab, "find_deno", lambda: "/usr/bin/deno")
     monkeypatch.setattr(grab.importlib.util, "find_spec", lambda name: None)
     ejs = {c["id"]: c for c in grab.run_diagnostics(tmp_path)}["ejs"]
     assert ejs["status"] == "warn" and ejs["action"] == "install_default"
-    assert 'yt-dlp[default]"' in ejs["fix"]
+    assert 'yt-dlp[curl-cffi,default]"' in ejs["fix"]
 
 
 def test_diagnostics_reports_unwritable_output_folder(tmp_path):
@@ -157,6 +166,24 @@ def test_discover_without_js_render_gives_a_hint(monkeypatch, tmp_path):
     a = args_for(tmp_path, js_render=False, list_formats=False, no_sniff=False, all_sniffed=False)
     assert not grab.discover_and_download("http://page", a, lambda *x, **k: False, log=logs.append)
     assert any("--js-render" in m for m in logs)
+
+
+def test_discover_prefers_site_adapter_before_generic_scan(monkeypatch, tmp_path):
+    monkeypatch.setattr(grab, "has_specific_extractor", lambda u: False)
+    monkeypatch.setattr(grab, "site_media_urls", lambda *a, **k: ("Episode", ["https://cdn.example/v-720p.mp4"]))
+    monkeypatch.setattr(grab, "sniff_media_urls", lambda *a, **k: (_ for _ in ()).throw(AssertionError("not reached")))
+    tried = []
+
+    def download_one(url, referer=None, name=None):
+        tried.append((url, referer, name))
+        return len(tried) == 2
+
+    a = args_for(tmp_path, list_formats=False, no_sniff=False, all_sniffed=False)
+    assert grab.discover_and_download("https://hanime1.me/watch?v=abc", a, download_one, log=lambda m: None)
+    assert tried == [
+        ("https://hanime1.me/watch?v=abc", None, None),
+        ("https://cdn.example/v-720p.mp4", "https://hanime1.me/watch?v=abc", "Episode"),
+    ]
 
 
 # ── MP3 work directory: must never touch a same-named MP4 ──

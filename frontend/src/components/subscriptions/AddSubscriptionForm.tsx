@@ -88,8 +88,8 @@ export function AddSubscriptionForm({ options, onAdded, onToast }: Props) {
         <span className="font-medium text-zinc-100">{describeOptions(options)}</span>
         <span className="text-zinc-500">
           {' '}
-          - taken from &quot;New download&quot; on the left. You can change this per subscription after adding
-          it.
+          - taken from your current &quot;New download&quot; settings. You can change this per subscription
+          after adding it.
         </span>
       </p>
     </div>

@@ -12,10 +12,10 @@ What it does
   * --doctor checks your setup (ffmpeg, JavaScript runtime, cookies, network)
 
 Requirements
-  pip install -U "yt-dlp[default]"      # "default" adds the components YouTube needs
+  pip install -U "yt-dlp[curl-cffi,default]"  # also supports sites that require browser impersonation
   ffmpeg                                # merging audio/video and MP3 conversion, must be on PATH
   YouTube also needs a JavaScript runtime, Deno is the one yt-dlp enables by default:
-      pip install -U "yt-dlp[default,deno]"   or   winget install DenoLand.Deno
+      pip install -U "yt-dlp[curl-cffi,default,deno]"   or   winget install DenoLand.Deno
   Optional: pip install playwright      # only for --js-render
 
 Only download content you have the right to download, and follow the terms of the
@@ -44,11 +44,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 
+from grab_sites import hanime1_download_page, parse_hanime1_downloads
+
 try:
     import yt_dlp
     from yt_dlp.utils import DownloadError, parse_bytes, sanitize_filename
 except ImportError:
-    sys.exit('Missing dependency: please run  pip install -U "yt-dlp[default]"  first')
+    sys.exit('Missing dependency: please run  pip install -U "yt-dlp[curl-cffi,default]"  first')
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -365,6 +367,27 @@ def sniff_media_urls(page_url: str, log=print, proxy: str | None = None) -> tupl
     return title, uniq
 
 
+def site_media_urls(page_url: str, args, log=print) -> tuple[str, list[str]]:
+    """Resolve stable site-specific download pages before falling back to heuristic scanning."""
+    download_page = hanime1_download_page(page_url)
+    if not download_page:
+        return "", []
+    log("[Site] Reading hanime1.me download options...")
+    try:
+        ctype, raw, enc = fetch_page(download_page, proxy=args.proxy)
+        if "html" not in ctype and not ctype.startswith("text/"):
+            return "", []
+        media = parse_hanime1_downloads(raw.decode(enc, errors="replace"), download_page, args.quality)
+    except Exception as e:  # noqa: BLE001
+        log(f"[Site] Cannot read hanime1.me download options: {e}")
+        return "", []
+    if not media:
+        log("[Site] No download links were present. The page may require login or may have changed.")
+        return "", []
+    title = next((item.title for item in media if item.title), "")
+    return title, [item.url for item in media]
+
+
 # ───────────────────────── Headless Browser Rendering (Optional) ─────────────────────────
 class JSRenderError(RuntimeError):
     """Headless browser is unavailable or page failed to load."""
@@ -557,6 +580,14 @@ def discover_and_download(url: str, args, download_one, log=print, on_title=None
                     break
         return ok_any
 
+    title, site_cands = site_media_urls(url, args, log)
+    if site_cands:
+        log(f"[Site] Found {len(site_cands)} download option(s)")
+        if title and on_title:
+            on_title(title)
+        if try_all(site_cands, title, "Site"):
+            return True
+
     log("[Scan] yt-dlp could not directly recognize the page, looking for media addresses in page source code...")
     title, cands = sniff_media_urls(url, log, proxy=args.proxy)
     if cands:
@@ -699,6 +730,14 @@ def run_diagnostics(output_dir: str | Path | None = None, net: bool = False) -> 
         + (f" (this yt-dlp needs {req})" if req else ""),
         fix="" if py_ok else "Install a newer Python from python.org."))
     checks.append(check_item("ytdlp", "yt-dlp", "ok", f"Version {yt_dlp.version.__version__}"))
+    if importlib.util.find_spec("curl_cffi"):
+        checks.append(check_item("impersonation", "Browser impersonation", "ok",
+                                 f"curl_cffi {_dist_version('curl-cffi') or 'installed'}"))
+    else:
+        checks.append(check_item(
+            "impersonation", "Browser impersonation", "warn",
+            "Not installed. Iwara and some sites protected by anti-bot services may reject requests.",
+            fix='pip install -U "yt-dlp[curl-cffi,default]"', action="install_default"))
 
     # ffmpeg / ffprobe
     ffmpeg = shutil.which("ffmpeg")
@@ -724,14 +763,14 @@ def run_diagnostics(output_dir: str | Path | None = None, net: bool = False) -> 
                   + (f"{', '.join(others)} is installed, but yt-dlp only enables Deno by default. " if others else "")
                   + "You can also install Deno yourself: winget install DenoLand.Deno (Windows) or brew install deno (macOS).")
         checks.append(check_item("js_runtime", "JavaScript runtime (Deno)", "warn", detail,
-                                 fix='pip install -U "yt-dlp[default,deno]"', action="install_components"))
+                                 fix='pip install -U "yt-dlp[curl-cffi,default,deno]"', action="install_components"))
     if importlib.util.find_spec("yt_dlp_ejs"):
         checks.append(check_item("ejs", "yt-dlp-ejs component", "ok", f"Version {_dist_version('yt-dlp-ejs') or 'installed'}"))
     else:
         checks.append(check_item("ejs", "yt-dlp-ejs component", "warn",
                                  "Not installed. yt-dlp uses it to solve YouTube's challenges together with the JavaScript runtime. "
                                  "It is included when you install yt-dlp with the default extra.",
-                                 fix='pip install -U "yt-dlp[default]"',
+                                 fix='pip install -U "yt-dlp[curl-cffi,default]"',
                                  action="install_components" if not deno else "install_default"))
 
     # Playwright (optional)
