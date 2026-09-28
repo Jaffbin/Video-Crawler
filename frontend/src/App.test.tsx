@@ -27,6 +27,7 @@ function mockApi(overrides: Partial<Record<string, unknown>> = {}) {
         if (url.startsWith('/api/state')) return baseState
         if (url.startsWith('/api/doctor')) return { checks: [], report: '', net: false }
         if (url.startsWith('/api/ytdlp/check')) return { running: '1', installed: '1', needs_restart: false }
+        if (url.startsWith('/api/subscriptions')) return { subscriptions: [], interval_seconds: 3600 }
         for (const [key, value] of Object.entries(overrides)) if (url.startsWith(key)) return value
         return { ok: true }
       }

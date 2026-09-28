@@ -71,3 +71,18 @@ export function saveOptions(options: DownloadOptions): void {
     /* storage can be unavailable; the options just won't be remembered */
   }
 }
+
+/** A short human summary of what a download (or subscription) will produce, e.g. "MP4 · up to 1080p". */
+export function describeOptions(
+  options: Pick<DownloadOptions, 'mode' | 'quality' | 'abr' | 'subs' | 'cover'>,
+): string {
+  const parts: string[] = []
+  if (options.mode === 'mp3') {
+    parts.push('MP3', `${options.abr} kbps`)
+  } else {
+    parts.push('MP4', options.quality === 'best' ? 'best quality' : `up to ${options.quality}p`)
+  }
+  if (options.mode !== 'mp3' && options.subs) parts.push('subtitles')
+  if (options.cover) parts.push('cover')
+  return parts.join(' · ')
+}

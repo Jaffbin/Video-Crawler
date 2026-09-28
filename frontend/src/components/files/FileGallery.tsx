@@ -89,10 +89,8 @@ export function FileGallery({ files, windowMode, onRefresh, onToast }: Props) {
                 </a>
               )}
               <a className="action-btn" href={fileUrl(f.path)} download={f.name}>
-                 Download
+                Download
               </a>
-
-
 
               <button
                 type="button"

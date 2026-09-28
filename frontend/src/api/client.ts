@@ -1,4 +1,7 @@
 import type {
+  BackfillMode,
+  Subscription,
+  SubscriptionsResponse,
   ComponentExtras,
   CookieStatus,
   DoctorResult,
@@ -83,3 +86,31 @@ export const restart = () => post<{ ok: boolean }>('/api/restart')
 /** Asks the backend to show a native OS notification (window mode only; see StateResponse.desktop_notifications). */
 export const notifyDesktop = (title: string, body: string) =>
   post<{ ok: boolean }>('/api/notify', { title, body })
+
+export const getSubscriptions = () => api<SubscriptionsResponse>('/api/subscriptions')
+export const addSubscription = (
+  url: string,
+  options: DownloadOptions,
+  backfill: BackfillMode,
+  backfillCount: number,
+) =>
+  post<Subscription>('/api/subscriptions', {
+    url,
+    options: sanitizeOptions(options),
+    backfill,
+    backfill_count: backfillCount,
+  })
+export const updateSubscription = (
+  id: string,
+  patch: Partial<Pick<Subscription, 'enabled' | 'backfill' | 'backfill_count'>> & {
+    options?: DownloadOptions
+  },
+) =>
+  post<Subscription>(`/api/subscriptions/${id}/update`, {
+    ...patch,
+    // The backend replaces the whole settings object, so it must always be complete and valid.
+    ...(patch.options ? { options: sanitizeOptions(patch.options) } : {}),
+  })
+export const checkSubscriptionNow = (id: string) =>
+  post<{ ok: boolean }>(`/api/subscriptions/${id}/check-now`)
+export const removeSubscription = (id: string) => post<{ ok: boolean }>(`/api/subscriptions/${id}/remove`)

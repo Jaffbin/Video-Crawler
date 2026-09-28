@@ -12,7 +12,7 @@ change the interface itself.
 
 ```
 cd frontend
-npm install
+npm ci
 npm run build      # writes ../webui_dist/ - webui.py serves it automatically
 ```
 
@@ -40,8 +40,11 @@ the session (see `src/api/client.ts`).
 ```
 npm run typecheck   # tsc, no emit
 npm test            # vitest
+npm run format:check
 npm run format      # prettier --write src
 ```
+
+Frontend development requires Node.js 24.15 or newer (as required by the locked toolchain).
 
 ## Project layout
 

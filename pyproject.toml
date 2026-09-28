@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-grabber-local"
+version = "0.1.0"
+description = "A private local video and audio downloader powered by yt-dlp and ffmpeg"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "yt-dlp[default,deno]",
+]
+
+[project.optional-dependencies]
+desktop = ["pywebview"]
+render = ["playwright"]
+dev = ["pytest>=8,<10", "ruff>=0.14,<1"]
+
+[tool.setuptools]
+py-modules = ["grab", "grab_config", "grab_models", "grab_state", "grab_storage", "webui"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

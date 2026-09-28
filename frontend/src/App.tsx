@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { loadOptions, saveOptions } from './lib/options'
 import { getUpdateStatus, openFolder, startYtdlpUpdate } from './api/client'
 import { Banners } from './components/layout/Banners'
 import { Header, type NotificationMode } from './components/layout/Header'
 import { RestartOverlay } from './components/layout/RestartOverlay'
 import { NewDownloadPanel } from './components/download/NewDownloadPanel'
 import { QueuePanel } from './components/queue/QueuePanel'
+import { SubscriptionsPanel } from './components/subscriptions/SubscriptionsPanel'
 import { FileGallery } from './components/files/FileGallery'
 import { DiagnosticsModal } from './components/diagnostics/DiagnosticsModal'
 import { UpdateModal } from './components/diagnostics/UpdateModal'
@@ -13,8 +15,9 @@ import { useStatePolling } from './hooks/useStatePolling'
 import { useCompletionNotifier } from './hooks/useCompletionNotifier'
 import { useEnvironment } from './hooks/useEnvironment'
 import { useRestart } from './hooks/useRestart'
+import { useSubscriptions } from './hooks/useSubscriptions'
 import { useToasts } from './hooks/useToasts'
-import type { ComponentExtras, YtdlpCheck } from './types/api'
+import type { ComponentExtras, DownloadOptions, YtdlpCheck } from './types/api'
 
 function useNotificationMode(serverNotifies: boolean): [NotificationMode, () => void] {
   const supported = typeof Notification !== 'undefined'
@@ -32,6 +35,16 @@ function useNotificationMode(serverNotifies: boolean): [NotificationMode, () => 
 
 export default function App() {
   const { state, online, refresh, refreshFiles } = useStatePolling()
+  const { subscriptions, intervalSeconds, refresh: refreshSubs } = useSubscriptions()
+  // One copy of the download settings, shared by "New download" and the subscription form.
+  const [options, setOptions] = useState<DownloadOptions>(loadOptions)
+  const patchOptions = useCallback((change: Partial<DownloadOptions>) => {
+    setOptions((current) => {
+      const next = { ...current, ...change }
+      saveOptions(next)
+      return next
+    })
+  }, [])
   const { toasts, push: toast, remove } = useToasts()
   const environment = useEnvironment()
   const { restarting, restartService } = useRestart((m) => toast(m, true))
@@ -70,7 +83,6 @@ export default function App() {
 
   const jobs = useMemo(() => state.jobs, [state.jobs])
 
-
   return (
     <div className="min-h-screen pb-16">
       <Header
@@ -98,10 +110,23 @@ export default function App() {
 
       <main className="mx-auto grid max-w-[1500px] gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[420px_1fr]">
         <div className="lg:sticky lg:top-20 lg:self-start">
-          <NewDownloadPanel playwright={state.playwright} onToast={toast} onAdded={refresh} />
+          <NewDownloadPanel
+            options={options}
+            onOptionsChange={patchOptions}
+            playwright={state.playwright}
+            onToast={toast}
+            onAdded={refresh}
+          />
         </div>
         <div className="grid gap-5">
           <QueuePanel jobs={jobs} windowMode={!!state.window} onChanged={refresh} onToast={toast} />
+          <SubscriptionsPanel
+            options={options}
+            subscriptions={subscriptions}
+            intervalSeconds={intervalSeconds}
+            onChanged={refreshSubs}
+            onToast={toast}
+          />
           <FileGallery
             files={state.files ?? []}
             windowMode={!!state.window}

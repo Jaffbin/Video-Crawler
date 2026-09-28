@@ -28,7 +28,7 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
     <div className="overflow-hidden rounded-2xl border border-white/8 bg-white/[.025]">
       <div className="flex gap-4 p-4">
         {probe.thumbnail ? (
-          <img 
+          <img
             src={probe.thumbnail}
             alt=""
             referrerPolicy="no-referrer"
@@ -42,7 +42,7 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
         <div className="min-w-0 flex-1">
           <div className="mb-1 text-xs uppercase tracking-wider text-zinc-400">{probe.kind ?? 'media'}</div>
           <h3 className="line-clamp-2 text-sm font-medium text-zinc-100">{probe.title || 'Untitled'}</h3>
-          {meta.length > 0 && <p className="mt-1 text-xs text-zinc-400">{meta.join('   ')}</p>}
+          {meta.length > 0 && <p className="mt-1 text-xs text-zinc-400">{meta.join(' · ')}</p>}
           {probe.kind === 'playlist' && probe.count != null && (
             <p className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
               <ListVideo aria-hidden size={13} />
@@ -67,9 +67,7 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
           </ul>
 
           {probe.items.length > 10 && (
-            <p className="mt-2 text-xs text-zinc-500">
-              +{probe.items.length - 10} more items
-            </p>
+            <p className="mt-2 text-xs text-zinc-500">+{probe.items.length - 10} more items</p>
           )}
         </div>
       )}
@@ -88,8 +86,9 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
                   type="button"
                   aria-pressed={selected}
                   onClick={() => onPickQuality(String(h))}
-                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${selected ? 'bg-white text-black' : 'bg-white/[.06] text-zinc-300 hover:bg-white/[.1]'
-                    }`}
+                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                    selected ? 'bg-white text-black' : 'bg-white/[.06] text-zinc-300 hover:bg-white/[.1]'
+                  }`}
                 >
                   {selected && <Check aria-hidden size={12} />} {h}p
                 </button>
@@ -101,11 +100,9 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
 
       {probe.sources && probe.sources.length > 0 && (
         <div className="border-t border-white/8 px-4 py-3 text-xs text-zinc-400">
-            {probe.count ?? probe.sources.length} media source
-            {(probe.count ?? probe.sources.length) > 1 ? 's' : ''} detected
-            {probe.rendered
-              ? ' using page rendering.'
-              : '.'}
+          {probe.count ?? probe.sources.length} media source
+          {(probe.count ?? probe.sources.length) > 1 ? 's' : ''} detected
+          {probe.rendered ? ' using page rendering.' : '.'}
         </div>
       )}
     </div>

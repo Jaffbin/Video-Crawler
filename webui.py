@@ -18,8 +18,6 @@ Notes
 """
 from __future__ import annotations
 
-import argparse
-import collections
 import contextlib
 import hmac
 import importlib.metadata
@@ -37,7 +35,6 @@ import tempfile
 import threading
 import time
 import urllib.request
-import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -45,6 +42,10 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import grab  # noqa: E402
+from grab_config import parse_web_config  # noqa: E402
+from grab_models import BACKFILL_MAX, Job, Subscription, http_url  # noqa: E402
+from grab_state import JobManager, SubscriptionManager  # noqa: E402
+from grab_storage import JsonStore  # noqa: E402
 import yt_dlp  # noqa: E402
 from yt_dlp.utils import DownloadCancelled, DownloadError  # noqa: E402
 
@@ -59,14 +60,16 @@ WINDOW_MODE = False  # set from main(): running inside a pywebview window rather
 MEDIA_SUFFIX = {".mp4", ".mp3", ".m4a", ".webm", ".mkv", ".mov", ".aac", ".flac", ".ogg", ".opus"}
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
-JOBS: dict[str, "Job"] = {}
-JOBS_LOCK = threading.Lock()
-QUEUE: "queue.Queue[Job]" = queue.Queue()
 FILES_REV = 0
 PORT = 0
 WORKERS = 2
 UI_MODE = "browser"
 HISTORY_MAX = 500
+JOB_MANAGER = JobManager(HISTORY_MAX)
+# Compatibility aliases for existing integrations and tests. New code goes through JOB_MANAGER.
+JOBS = JOB_MANAGER.jobs
+QUEUE = JOB_MANAGER.queue
+STOP_EVENT = threading.Event()
 _SAVE_LOCK = threading.Lock()
 FILES_CACHE: dict = {"rev": None, "ts": 0.0, "data": []}
 UPDATE: dict = {"status": "idle", "lines": [], "before": "", "after": "", "error": "", "extras": ""}
@@ -168,11 +171,6 @@ def friendly_error(msg: str) -> str:
     return m[:300] or "Download failed, expand log to see the reason."
 
 
-def http_url(v, schemes=("http", "https")) -> str | None:
-    v = str(v or "").strip()
-    return v if re.match(rf"^({'|'.join(schemes)})://\S+$", v, re.I) else None
-
-
 def make_args(o: dict):
     """Organize options submitted from the web page into a parameter object for grab.py, validating item by item."""
     a = grab.parse_args([])
@@ -225,98 +223,6 @@ def make_args(o: dict):
 
 
 # ───────────────────────── Jobs ─────────────────────────
-class Job:
-    def __init__(self, url: str, options: dict):
-        self.id = uuid.uuid4().hex[:8]
-        self.url = url
-        self.options = options
-        self.status = "queued"       # queued / running / done / error / canceled
-        self.stage = "Queued"
-        self.title = ""
-        self.percent = 0.0
-        self.speed = ""
-        self.eta = ""
-        self.item = ""
-        self.error = ""
-        self.files: list[str] = []
-        self.seen_paths: list[str] = []
-        self.log: collections.deque[str] = collections.deque(maxlen=400)
-        self.cancel = threading.Event()
-        self.created = time.time()
-        self._parts_done = 0
-        self._cur_id = None
-        self.title_locked = False
-        self.finished = 0.0
-        self.notes: list[str] = []
-        self._note_keys: set[str] = set()
-
-    def to_dict(self) -> dict:
-        rels = []
-        for f in self.files:
-            try:
-                rels.append(Path(f).resolve().relative_to(ROOT).as_posix())
-            except (ValueError, OSError):
-                pass
-        keep_log = list(self.log)[-30:] if self.status in ("error", "canceled") else []
-        return {
-            "id": self.id, "url": self.url, "options": self.options, "status": self.status,
-            "stage": self.stage, "title": self.title, "percent": self.percent, "item": self.item,
-            "error": self.error, "files": rels, "created": self.created, "finished": self.finished,
-            "log": [x[:300] for x in keep_log], "notes": self.notes[:3],
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "Job | None":
-        url, jid = http_url(d.get("url")), str(d.get("id") or "")
-        if not url or not re.fullmatch(r"[0-9a-f]{8}", jid):
-            return None
-        opts = d.get("options") if isinstance(d.get("options"), dict) else {}
-        job = cls(url, opts)
-        job.id = jid
-        st = d.get("status")
-        interrupted = st in ("queued", "running")
-        job.status = st if st in ("done", "error", "canceled") else "canceled"
-        job.stage = "Last incomplete" if interrupted else {"done": "Done", "error": "Failed", "canceled": "Canceled"}[job.status]
-        job.title = str(d.get("title") or "")[:300]
-        job.item = str(d.get("item") or "")[:20]
-        job.error = ("This task was incomplete when the program exited, you can click 'Retry'." if interrupted
-                     else str(d.get("error") or "")[:600])
-        try:
-            job.percent = 100.0 if job.status == "done" else float(d.get("percent") or 0)
-            job.created = float(d.get("created") or time.time())
-            job.finished = float(d.get("finished") or 0)
-        except (TypeError, ValueError):
-            job.created = time.time()
-        if interrupted and not job.finished:
-            job.finished = time.time()
-        for rel in d.get("files") or []:
-            try:
-                fp = (ROOT / str(rel)).resolve()
-                fp.relative_to(ROOT)
-                if fp.is_file():
-                    job.files.append(str(fp))
-            except (ValueError, OSError):
-                continue
-        job.log.extend(str(x)[:300] for x in (d.get("log") or [])[-30:])
-        job.notes = [str(x)[:300] for x in (d.get("notes") or [])[:3]] if isinstance(d.get("notes"), list) else []
-        return job
-
-    def view(self) -> dict:
-        files = []
-        for f in self.files:
-            try:
-                files.append({"name": Path(f).name, "path": Path(f).resolve().relative_to(ROOT).as_posix()})
-            except (ValueError, OSError):
-                pass
-        return {
-            "id": self.id, "url": self.url, "status": self.status, "stage": self.stage,
-            "title": self.title, "percent": round(self.percent, 1), "speed": self.speed,
-            "eta": self.eta, "item": self.item, "error": self.error, "files": files,
-            "mode": self.options.get("mode", "mp4"),
-            "created": self.created, "finished": self.finished, "notes": list(self.notes),
-        }
-
-
 def run_job(job: Job) -> None:
     args = make_args(job.options)
 
@@ -432,9 +338,13 @@ def run_job(job: Job) -> None:
     job.speed = job.eta = ""
 
 
-def worker() -> None:
-    while True:
-        job = QUEUE.get()
+def worker(stop_event: threading.Event | None = None) -> None:
+    stop_event = stop_event or STOP_EVENT
+    while not stop_event.is_set():
+        try:
+            job = QUEUE.get(timeout=0.5)
+        except queue.Empty:
+            continue
         try:
             if job.cancel.is_set():
                 continue
@@ -452,15 +362,8 @@ def worker() -> None:
             QUEUE.task_done()
 
 
-def create_jobs(urls: list[str], options: dict) -> list[str]:
-    ids = []
-    for u in urls:
-        job = Job(u, options)
-        with JOBS_LOCK:
-            JOBS[job.id] = job
-        QUEUE.put(job)
-        ids.append(job.id)
-    prune_jobs()
+def create_jobs(urls: list[str], options: dict, source: str = "") -> list[str]:
+    ids = JOB_MANAGER.enqueue(urls, options, source)
     save_history()
     return ids
 
@@ -623,41 +526,28 @@ def history_file() -> Path:
     return ROOT / ".grab-history.json"
 
 
+HISTORY_STORE = JsonStore(history_file, _SAVE_LOCK)
+
+
 def save_history() -> None:
-    with JOBS_LOCK:
-        data = [j.to_dict() for j in sorted(JOBS.values(), key=lambda j: j.created)[-HISTORY_MAX:]]
+    data = [job.to_dict(ROOT) for job in JOB_MANAGER.snapshot()[-HISTORY_MAX:]]
     try:
-        with _SAVE_LOCK:
-            tmp = history_file().with_suffix(".tmp")
-            tmp.write_text(json.dumps({"version": 1, "jobs": data}, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, history_file())
+        HISTORY_STORE.save({"version": 1, "jobs": data})
     except OSError as e:
         print(f"Cannot save history: {e}")
 
 
 def load_history() -> None:
-    try:
-        raw = json.loads(history_file().read_text(encoding="utf-8"))
-        items = raw.get("jobs", []) if isinstance(raw, dict) else []
-    except (OSError, ValueError):
-        return
+    raw = HISTORY_STORE.load()
+    items = raw.get("jobs", []) if isinstance(raw, dict) else []
     for d in items[-HISTORY_MAX:]:
-        job = Job.from_dict(d) if isinstance(d, dict) else None
+        job = Job.from_dict(d, ROOT) if isinstance(d, dict) else None
         if job:
-            JOBS[job.id] = job
-
-
-def prune_jobs() -> None:
-    """Finished jobs are kept up to HISTORY_MAX, oldest are dropped first."""
-    with JOBS_LOCK:
-        finished = sorted((j for j in JOBS.values() if j.status in ("done", "error", "canceled")),
-                          key=lambda j: j.created)
-        for j in finished[: max(0, len(JOBS) - HISTORY_MAX)]:
-            JOBS.pop(j.id, None)
+            JOB_MANAGER.add_restored(job)
 
 
 def active_jobs() -> int:
-    return sum(1 for j in list(JOBS.values()) if j.status in ("queued", "running"))
+    return JOB_MANAGER.active_count()
 
 
 # ───────────────────────── Update yt-dlp / Restart ─────────────────────────
@@ -880,13 +770,28 @@ def collect_doctor(net: bool = False, force: bool = False) -> dict:
                                       "None uploaded. Only needed for logged-in, member-only or age-restricted videos."))
     checks.append(grab.check_item("server", "Web UI", "info",
                                   f"Port {PORT}, {WORKERS} worker(s), interface: {UI_MODE}. Settings folder: {CONFIG_DIR}"))
+    dist_ok, dist_problem = check_dist()
+    if dist_ok:
+        checks.append(grab.check_item("interface", "Interface files (webui_dist)", "ok", f"Complete, served from {UI_DIST}."))
+    else:
+        checks.append(grab.check_item(
+            "interface", "Interface files (webui_dist)", "warn",
+            f"Incomplete ({dist_problem}), so this page is the basic fallback. "
+            "webui_dist/ needs index.html and an assets/ folder next to webui.py.",
+            fix="Copy the whole webui_dist folder from the release, keeping its assets/ subfolder."))
     if importlib.util.find_spec("webview"):
         checks.append(grab.check_item("pywebview", "Desktop window (pywebview)", "ok",
                                       "Installed. Start with --ui window for a native window instead of a browser tab."))
     else:
         checks.append(grab.check_item("pywebview", "Desktop window (pywebview)", "info",
                                       "Not installed. Optional: only needed for --ui window.", fix="pip install pywebview"))
-    failures = sorted((j for j in list(JOBS.values()) if j.status == "error"),
+    subscriptions = SUBSCRIPTION_MANAGER.snapshot()
+    active = sum(1 for subscription in subscriptions if subscription.enabled)
+    total = len(subscriptions)
+    if total:
+        checks.append(grab.check_item("subscriptions", "Subscriptions", "ok" if active else "info",
+                                      f"{active} of {total} active, checked every {SUB_INTERVAL_SECONDS // 60} minutes."))
+    failures = sorted((job for job in JOB_MANAGER.snapshot() if job.status == "error"),
                       key=lambda j: j.finished or j.created, reverse=True)[:3]
     sections = [(f"Recent failure {i}", [j.url, f"Error: {j.error}"] + [ln[:200] for ln in list(j.log)[-12:]])
                 for i, j in enumerate(failures, 1)]
@@ -896,6 +801,152 @@ def collect_doctor(net: bool = False, force: bool = False) -> dict:
     return data
 
 
+# ───────────────────────── Subscriptions (auto-download new videos) ─────────────────────────
+SUB_INTERVAL_SECONDS = 3600  # how often a subscription is re-checked; set from --sub-interval in main()
+SUB_TICK_SECONDS = 300       # how often the scheduler thread wakes up to see what is due
+
+SUBSCRIPTION_MANAGER = SubscriptionManager()
+# Compatibility aliases for existing integrations and tests. New code goes through the manager.
+SUBS = SUBSCRIPTION_MANAGER.subscriptions
+_CHECKING = SUBSCRIPTION_MANAGER.checking
+
+
+def subs_path() -> Path:
+    return ROOT / ".grab-subscriptions.json"
+
+
+SUBSCRIPTIONS_STORE = JsonStore(subs_path, _SAVE_LOCK)
+
+
+def subscription_view(subscription: Subscription) -> dict:
+    return subscription.view(SUB_INTERVAL_SECONDS, SUBSCRIPTION_MANAGER.is_checking(subscription.id))
+
+
+def save_subscriptions() -> None:
+    data = [subscription.to_dict() for subscription in SUBSCRIPTION_MANAGER.snapshot()]
+    try:
+        SUBSCRIPTIONS_STORE.save({"version": 1, "subscriptions": data})
+    except OSError as e:
+        print(f"Could not save subscriptions: {e}")
+
+
+def load_subscriptions() -> None:
+    raw = SUBSCRIPTIONS_STORE.load()
+    items = raw.get("subscriptions", []) if isinstance(raw, dict) else []
+    for d in items:
+        sub = Subscription.from_dict(d) if isinstance(d, dict) else None
+        if sub:
+            SUBSCRIPTION_MANAGER.add(sub)
+
+
+def list_flat_entries(url: str, args) -> tuple[str, list[dict]]:
+    """Newest-first (usually) list of {id, url, title} without downloading anything.
+
+    Raises on network/extractor errors - the caller decides how to report those.
+    """
+    opts = {
+        "quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "socket_timeout": 20,
+        "http_headers": {"User-Agent": grab.UA}, **grab.js_runtime_opts(),
+    }
+    if args.proxy:
+        opts["proxy"] = args.proxy
+    if args.cookies_from_browser:
+        opts["cookiesfrombrowser"] = (args.cookies_from_browser,)
+    with cookie_copy(args) as cookiefile:
+        if cookiefile:
+            opts["cookiefile"] = cookiefile
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    if info is None:
+        return "", []
+    return str(info.get("title") or ""), normalize_flat_entries(info, url)
+
+
+def normalize_flat_entries(info: dict, fallback_url: str) -> list[dict]:
+    """Keep only entries with a usable web URL; flat extractors sometimes put a bare ID in ``url``."""
+    is_playlist = info.get("_type") == "playlist"
+    entries = list(info.get("entries") or []) if is_playlist else [info]
+    normalized = []
+    for entry in entries:
+        if not entry or not entry.get("id"):
+            continue
+        entry_url = http_url(entry.get("webpage_url")) or http_url(entry.get("url"))
+        if not entry_url and not is_playlist:
+            entry_url = fallback_url
+        if entry_url:
+            normalized.append({
+                "id": str(entry["id"]), "url": entry_url, "title": entry.get("title") or "",
+            })
+    return normalized
+
+
+def split_backfill(entries: list[dict], count: int) -> tuple[list[dict], list[dict]]:
+    """(entries to queue now, the rest) - assumes newest-first order, which is what channel/playlist
+    listings normally are; if a site instead lists oldest-first, backfill still just picks the first
+    `count` entries returned rather than the true most-recent ones."""
+    return entries[:count], entries[count:]
+
+
+def check_subscription(sub: "Subscription") -> None:
+    if not SUBSCRIPTION_MANAGER.begin_check(sub.id):
+        return
+    try:
+        args = make_args(sub.options)
+        try:
+            title, entries = list_flat_entries(sub.url, args)
+        except Exception as e:  # noqa: BLE001
+            sub.last_error = friendly_error(str(e))
+            sub.last_checked = time.time()
+            return
+        if title:
+            sub.title = title[:300]
+        # A manual check may still be waiting on the network when the user
+        # removes the subscription. Removal must prevent any later downloads.
+        if sub.removed:
+            return
+        current_ids = {e["id"] for e in entries}
+
+        if not sub.initialized:
+            to_queue, rest = split_backfill(entries, sub.backfill_count if sub.backfill == "recent" else 0)
+            sub.seen_ids = current_ids
+            sub.initialized = True
+        else:
+            to_queue = [e for e in entries if e["id"] not in sub.seen_ids]
+            sub.seen_ids |= current_ids
+
+        if to_queue:
+            urls = [e["url"] for e in to_queue]
+            create_jobs(urls, sub.options, source=sub.id)
+            sub.total_queued += len(urls)
+        sub.last_error = ""
+        sub.last_checked = time.time()
+    finally:
+        SUBSCRIPTION_MANAGER.end_check(sub.id)
+        save_subscriptions()
+        bump_rev()
+
+
+def start_subscription_check(sub: Subscription) -> None:
+    threading.Thread(
+        target=check_subscription,
+        args=(sub,),
+        name=f"subscription-check-{sub.id}",
+        daemon=True,
+    ).start()
+
+
+def subscription_scheduler(stop_event: threading.Event | None = None) -> None:
+    stop_event = stop_event or STOP_EVENT
+    while not stop_event.wait(SUB_TICK_SECONDS):
+        for sub in SUBSCRIPTION_MANAGER.due(SUB_INTERVAL_SECONDS):
+            try:
+                check_subscription(sub)
+            except Exception as e:  # noqa: BLE001
+                sub.last_error, sub.last_checked = f"Unexpected error: {friendly_error(str(e))}", time.time()
+                save_subscriptions()
+                bump_rev()
+
+
 # ───────────────────────── Frontend (built React app) ─────────────────────────
 def render_dist_index() -> bytes | None:
     """The built frontend's index.html, with this run's token filled in. None if it was not built."""
@@ -903,6 +954,22 @@ def render_dist_index() -> bytes | None:
     if not index.is_file():
         return None
     return index.read_text(encoding="utf-8").replace("__GRAB_TOKEN__", TOKEN).encode("utf-8")
+
+
+def check_dist() -> tuple[bool, str]:
+    """Is the built interface complete? If not, the second value says what is missing.
+
+    Without this check, an incomplete webui_dist/ (say, the JS file saved next to grab.py instead of
+    inside webui_dist/assets/) silently shows the basic built-in page and looks like "nothing changed".
+    """
+    index = UI_DIST / "index.html"
+    if not index.is_file():
+        return False, f"{index} was not found"
+    referenced = re.findall(r'(?:src|href)="/(assets/[^"]+)"', index.read_text(encoding="utf-8"))
+    missing = [name for name in referenced if not (UI_DIST / name).is_file()]
+    if missing:
+        return False, "missing " + ", ".join(f"webui_dist/{m}" for m in missing)
+    return True, ""
 
 
 def read_static_asset(rel: str) -> tuple[bytes, str] | None:
@@ -997,9 +1064,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed(q):
             return
         if u.path == "/api/state":
-            with JOBS_LOCK:
-                jobs = sorted(JOBS.values(), key=lambda j: j.created, reverse=True)
-                views = [j.view() for j in jobs]
+            views = [job.view(ROOT) for job in JOB_MANAGER.snapshot(newest_first=True)]
             try:
                 client_rev = int((q.get("rev") or ["-1"])[0])
             except ValueError:
@@ -1013,13 +1078,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(data)
         m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/log", u.path)
         if m:
-            job = JOBS.get(m.group(1))
+            job = JOB_MANAGER.get(m.group(1))
             return self._json({"lines": list(job.log)[-200:] if job else []})
         if u.path == "/api/doctor":
             flag = lambda k: bool((q.get(k) or [""])[0])  # noqa: E731
             return self._json(collect_doctor(net=flag("net"), force=flag("force")))
         if u.path == "/api/cookies":
             return self._json(cookies_status())
+        if u.path == "/api/subscriptions":
+            subs = SUBSCRIPTION_MANAGER.snapshot(newest_first=True)
+            return self._json({"subscriptions": [subscription_view(s) for s in subs],
+                               "interval_seconds": SUB_INTERVAL_SECONDS})
         if u.path == "/api/ytdlp/check":
             return self._json(check_ytdlp(force=bool((q.get("force") or [""])[0])))
         if u.path == "/api/ytdlp/update-status":
@@ -1055,28 +1124,76 @@ class Handler(BaseHTTPRequestHandler):
 
         m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/(cancel|retry|remove)", u.path)
         if m:
-            job, action = JOBS.get(m.group(1)), m.group(2)
+            job, action = JOB_MANAGER.get(m.group(1)), m.group(2)
             if not job:
                 return self._json({"error": "Job not found"}, 404)
             if action == "cancel":
+                if job.status not in ("queued", "running"):
+                    return self._json({"error": "Only queued or running jobs can be canceled"}, 409)
                 job.cancel.set()
                 if job.status == "queued":
                     job.status, job.stage, job.finished = "canceled", "Canceled", time.time()
                     save_history()
                 else:
                     job.stage = "Canceling…"
-            elif action == "retry" and job.status in ("error", "canceled"):
+            elif action == "retry":
+                if job.status not in ("error", "canceled"):
+                    return self._json({"error": "Only failed or canceled jobs can be retried"}, 409)
                 return self._json({"ids": create_jobs([job.url], job.options)})
-            elif action == "remove" and job.status in ("done", "error", "canceled"):
-                with JOBS_LOCK:
-                    JOBS.pop(job.id, None)
+            elif action == "remove":
+                if job.status not in ("done", "error", "canceled"):
+                    return self._json({"error": "Running jobs must be canceled before removal"}, 409)
+                JOB_MANAGER.remove_finished(job.id)
                 save_history()
             return self._json({"ok": True})
 
+        if u.path == "/api/subscriptions":
+            url = http_url(body.get("url"))
+            if not url:
+                return self._json({"error": "Please enter an http(s) URL"}, 400)
+            backfill = str(body.get("backfill") or "none")
+            try:
+                backfill_count = int(body.get("backfill_count") or 5)
+            except (TypeError, ValueError):
+                backfill_count = 5
+            options = body.get("options") if isinstance(body.get("options"), dict) else {}
+            sub = Subscription(url, options, backfill, backfill_count)
+            SUBSCRIPTION_MANAGER.add(sub)
+            save_subscriptions()
+            start_subscription_check(sub)
+            return self._json(subscription_view(sub))
+
+        m = re.fullmatch(r"/api/subscriptions/([0-9a-f]{8})/(update|check-now|remove)", u.path)
+        if m:
+            sub, action = SUBSCRIPTION_MANAGER.get(m.group(1)), m.group(2)
+            if not sub:
+                return self._json({"error": "Subscription not found"}, 404)
+            if action == "update":
+                if "enabled" in body:
+                    if not isinstance(body["enabled"], bool):
+                        return self._json({"error": "enabled must be true or false"}, 400)
+                    sub.enabled = bool(body["enabled"])
+                if "options" in body and isinstance(body["options"], dict):
+                    sub.options = dict(body["options"])
+                if body.get("backfill") in ("none", "recent"):
+                    sub.backfill = body["backfill"]
+                if "backfill_count" in body:
+                    try:
+                        sub.backfill_count = max(1, min(int(body["backfill_count"]), BACKFILL_MAX))
+                    except (TypeError, ValueError):
+                        pass
+                save_subscriptions()
+                return self._json(subscription_view(sub))
+            if action == "check-now":
+                start_subscription_check(sub)
+                return self._json({"ok": True})
+            if action == "remove":
+                SUBSCRIPTION_MANAGER.remove(sub.id)
+                save_subscriptions()
+                return self._json({"ok": True})
+
         if u.path == "/api/clear":
-            with JOBS_LOCK:
-                for jid in [j.id for j in JOBS.values() if j.status in ("done", "error", "canceled")]:
-                    JOBS.pop(jid, None)
+            JOB_MANAGER.clear_finished()
             save_history()
             return self._json({"ok": True})
 
@@ -2029,30 +2146,22 @@ def open_native_window(url: str) -> bool:
     return True
 
 
-def main() -> None:
+def main(argv=None) -> None:
     global ROOT, PORT, WORKERS, WINDOW_MODE, UI_MODE
-    ap = argparse.ArgumentParser(description="Local Web UI for grab.py")
-    ap.add_argument("--dir", default="downloads", help="Download directory (default: ./downloads)")
-    ap.add_argument("--port", type=int, default=8765, help="Starting port, will auto-increment if occupied (default: 8765)")
-    ap.add_argument("--workers", type=int, default=2, help="Concurrent download task count (default: 2)")
-    ap.add_argument("--ui", choices=("window", "browser", "none"), default="window",
-                    help="window: a native app window (needs pywebview, the default); "
-                         "browser: open your default browser instead; "
-                         "none: do not open anything (for `npm run dev` against this backend)")
-    ap.add_argument("--no-browser", dest="ui", action="store_const", const="none",
-                    help=argparse.SUPPRESS)  # kept for older scripts; same as --ui none
-    a = ap.parse_args()
+    config = parse_web_config(argv)
 
-    ROOT = Path(a.dir).expanduser().resolve()
+    global SUB_INTERVAL_SECONDS
+    ROOT = config.download_dir
     ROOT.mkdir(parents=True, exist_ok=True)
     load_history()
-    WORKERS = max(1, min(a.workers, 6))
-    for _ in range(WORKERS):
-        threading.Thread(target=worker, daemon=True).start()
+    load_subscriptions()
+    SUB_INTERVAL_SECONDS = config.subscription_interval_seconds
+    WORKERS = config.workers
+    STOP_EVENT.clear()
 
     restarting = os.environ.get("GRAB_WEBUI_RESTART") == "1"
-    ui_mode = "none" if restarting else a.ui  # a restart only replaces the server; the old window/tab is kept
-    ports = [a.port] if restarting else list(range(a.port, a.port + 20))
+    ui_mode = "none" if restarting else config.ui  # a restart only replaces the server; the old window/tab is kept
+    ports = [config.port] if restarting else list(range(config.port, config.port + 20))
     srv = None
     for _attempt in range(30 if restarting else 1):  # When restarting, the old process might still hold the port, wait a bit
         for port in ports:
@@ -2076,7 +2185,22 @@ def main() -> None:
     if not shutil.which("ffmpeg"):
         print("Hint: ffmpeg not found, merging audio/video and MP3 conversion will fail.")
 
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    dist_ok, dist_problem = check_dist()
+    if not dist_ok:
+        print(f"WARNING: the new interface cannot be shown ({dist_problem}).")
+        print("         Showing the basic built-in page instead. webui_dist/ must contain index.html")
+        print("         and an assets/ folder with the .js and .css files that index.html refers to.")
+
+    worker_threads = [
+        threading.Thread(target=worker, name=f"download-worker-{index + 1}", daemon=True)
+        for index in range(WORKERS)
+    ]
+    scheduler_thread = threading.Thread(
+        target=subscription_scheduler, name="subscription-scheduler", daemon=True,
+    )
+    server_thread = threading.Thread(target=srv.serve_forever, name="http-server", daemon=True)
+    for thread in [*worker_threads, scheduler_thread, server_thread]:
+        thread.start()
     try:
         if ui_mode == "window":
             print("Close the window to stop.")
@@ -2085,14 +2209,24 @@ def main() -> None:
                 WINDOW_MODE = False
                 UI_MODE = "browser"
                 webbrowser.open(url)
-                threading.Event().wait()
+                STOP_EVENT.wait()
         else:
             if ui_mode == "browser":
                 webbrowser.open(url)
             print("Press Ctrl+C to stop.")
-            threading.Event().wait()
+            STOP_EVENT.wait()
     except KeyboardInterrupt:
         print("\nStopped.")
+    finally:
+        for job in JOB_MANAGER.snapshot():
+            if job.status in ("queued", "running"):
+                job.cancel.set()
+        STOP_EVENT.set()
+        srv.shutdown()
+        srv.server_close()
+        for thread in [*worker_threads, scheduler_thread, server_thread]:
+            thread.join(timeout=2)
+        save_history()
 
 
 if __name__ == "__main__":

@@ -79,9 +79,7 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
       return running ? `Item ${current}` : `${current} items`
     }
 
-    return running
-      ? `Item ${current}/${total}`
-      : `${total} items`
+    return running ? `Item ${current}/${total}` : `${total} items`
   }
 
   const report = (e: unknown) => onToast(e instanceof Error ? e.message : 'Could not open it', true)
@@ -124,7 +122,7 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
             <h3 className="truncate text-sm font-medium" title={job.url}>
               {job.title || job.url}
             </h3>
-            <p className="mt-0.5 text-xs text-zinc-400">{meta.join('   ')}</p>
+            <p className="mt-0.5 text-xs text-zinc-400">{meta.join(' · ')}</p>
           </div>
           <div className="text-right">
             <div

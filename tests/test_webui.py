@@ -22,7 +22,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(webui, "ROOT", root)
     monkeypatch.setattr(webui, "CONFIG_DIR", tmp_path / "cfg")
     monkeypatch.setattr(webui, "PORT", 0)
-    webui.JOBS.clear()
+    webui.JOB_MANAGER.reset()
+    webui.SUBSCRIPTION_MANAGER.reset()
     webui.DOCTOR_CACHE.update(ts=0.0, data=None)
     yield
 
@@ -93,7 +94,17 @@ def test_page_javascript_has_valid_syntax():
     if shutil.which("node") is None:
         pytest.skip("Node.js is not installed")
     js = re.search(r"<script>(.*?)</script>", webui.INDEX_HTML, re.S).group(1)
-    r = subprocess.run(["node", "--check", "-"], input=js, capture_output=True, text=True)
+    # Windows' locale encoding may be unable to encode the non-ASCII strings in
+    # the fallback UI.  When the subprocess writer thread fails, Node keeps
+    # waiting for EOF forever, so make both the encoding and timeout explicit.
+    r = subprocess.run(
+        ["node", "--check", "-"],
+        input=js,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+    )
     assert r.returncode == 0, r.stderr
 
 
@@ -149,14 +160,17 @@ def test_job_from_dict_rejects_bad_ids_urls_and_paths_outside_the_download_folde
     outside = tmp_path / "secret.mp4"
     outside.write_text("x")
     good = {"id": "abcd1234", "url": "https://example.com/v", "status": "done", "files": ["../secret.mp4"]}
-    job = webui.Job.from_dict(good)
+    job = webui.Job.from_dict(good, webui.ROOT)
     assert job and job.files == []
-    assert webui.Job.from_dict({**good, "id": "../../x"}) is None
-    assert webui.Job.from_dict({**good, "url": "file:///etc/passwd"}) is None
+    assert webui.Job.from_dict({**good, "id": "../../x"}, webui.ROOT) is None
+    assert webui.Job.from_dict({**good, "url": "file:///etc/passwd"}, webui.ROOT) is None
 
 
 def test_interrupted_jobs_come_back_as_retryable():
-    job = webui.Job.from_dict({"id": "abcd1234", "url": "https://example.com/v", "status": "running"})
+    job = webui.Job.from_dict(
+        {"id": "abcd1234", "url": "https://example.com/v", "status": "running"},
+        webui.ROOT,
+    )
     assert job.status == "canceled" and job.stage == "Last incomplete" and "Retry" in job.error
 
 
@@ -247,7 +261,7 @@ def test_a_missing_js_runtime_warning_becomes_a_visible_note(monkeypatch):
     webui.run_job(job)
     assert job.status == "done"
     assert len(job.notes) == 1 and "Diagnostics" in job.notes[0]
-    assert webui.Job.from_dict(job.to_dict() | {"status": "done"}).notes == job.notes
+    assert webui.Job.from_dict(job.to_dict(webui.ROOT) | {"status": "done"}, webui.ROOT).notes == job.notes
 
 
 # ───────────────────────── update / install components ─────────────────────────
@@ -275,6 +289,18 @@ def test_update_is_refused_while_jobs_are_active():
     assert not ok and "queued or downloading" in why
 
 
+def test_background_loops_stop_without_waiting_for_their_normal_interval():
+    stop = threading.Event()
+    stop.set()
+    worker_thread = threading.Thread(target=webui.worker, args=(stop,))
+    scheduler_thread = threading.Thread(target=webui.subscription_scheduler, args=(stop,))
+    worker_thread.start()
+    scheduler_thread.start()
+    worker_thread.join(1.0)
+    scheduler_thread.join(1.0)
+    assert not worker_thread.is_alive() and not scheduler_thread.is_alive()
+
+
 # ───────────────────────── the HTTP server ─────────────────────────
 def test_requests_without_the_token_are_rejected(server):
     assert call(server, "/api/state", token=False)[0] == 401
@@ -292,6 +318,21 @@ def test_posts_must_be_json(server):
 
 def test_only_http_urls_can_be_queued(server):
     assert call(server, "/api/jobs", {"urls": ["file:///etc/passwd", "ftp://x/y"]})[0] == 400
+
+
+@pytest.mark.parametrize(
+    "status,action",
+    [("done", "cancel"), ("done", "retry"), ("running", "remove")],
+)
+def test_job_actions_reject_invalid_state_transitions(server, status, action):
+    job = webui.Job("https://example.com/video", {})
+    job.status = status
+    job.stage = "Done" if status == "done" else "Downloading"
+    webui.JOBS[job.id] = job
+    response_status, _ = call(server, f"/api/jobs/{job.id}/{action}", {})
+    assert response_status == 409
+    assert job.status == status
+    assert job.stage == ("Done" if status == "done" else "Downloading")
 
 
 @pytest.mark.parametrize("path", ["../secret.mp4", "..%2Fsecret.mp4", "%2e%2e/secret.mp4", "/etc/passwd"])
@@ -369,3 +410,368 @@ def test_the_report_this_issue_boilerplate_is_not_a_login_problem():
            "filling out the appropriate issue template. Confirm you are on the latest version using  yt-dlp -U")
     msg = webui.friendly_error(raw)
     assert "requires login" not in msg and "please report" not in msg and "Something unexpected happened" in msg
+
+
+# ───────────────────────── Subscriptions ─────────────────────────
+def entry(vid, title=""):
+    return {"id": vid, "url": f"https://example.com/watch?v={vid}", "title": title or vid}
+
+
+def test_split_backfill_slices_newest_first():
+    entries = [entry("a"), entry("b"), entry("c"), entry("d")]
+    to_queue, rest = webui.split_backfill(entries, 2)
+    assert [e["id"] for e in to_queue] == ["a", "b"]
+    assert [e["id"] for e in rest] == ["c", "d"]
+
+
+def test_flat_entries_prefer_webpage_urls_and_drop_bare_ids():
+    info = {
+        "_type": "playlist",
+        "entries": [
+            {"id": "a", "url": "bare-id", "webpage_url": "https://example.com/watch/a", "title": "A"},
+            {"id": "b", "url": "still-a-bare-id", "title": "B"},
+            {"id": "c", "url": "https://example.com/watch/c", "title": "C"},
+        ],
+    }
+    entries = webui.normalize_flat_entries(info, "https://example.com/playlist")
+    assert [(item["id"], item["url"]) for item in entries] == [
+        ("a", "https://example.com/watch/a"),
+        ("c", "https://example.com/watch/c"),
+    ]
+
+
+def test_split_backfill_zero_queues_nothing():
+    to_queue, rest = webui.split_backfill([entry("a"), entry("b")], 0)
+    assert to_queue == [] and len(rest) == 2
+
+
+def test_subscription_from_dict_rejects_bad_ids_and_urls():
+    good = {"id": "abcd1234", "url": "https://example.com/c"}
+    assert webui.Subscription.from_dict(good) is not None
+    assert webui.Subscription.from_dict({**good, "id": "../x"}) is None
+    assert webui.Subscription.from_dict({**good, "url": "file:///etc/passwd"}) is None
+
+
+def test_subscription_from_dict_tolerates_corrupted_optional_fields():
+    sub = webui.Subscription.from_dict({
+        "id": "abcd1234",
+        "url": "https://example.com/c",
+        "backfill_count": "not-a-number",
+        "seen_ids": "not-a-list",
+    })
+    assert sub is not None
+    assert sub.backfill_count == 5 and sub.seen_ids == set()
+
+
+def test_subscription_round_trips_through_to_dict_and_from_dict():
+    sub = webui.Subscription("https://example.com/c", {"mode": "mp3"}, backfill="recent", backfill_count=3)
+    sub.seen_ids = {"a", "b"}
+    sub.initialized = True
+    sub.total_queued = 2
+    restored = webui.Subscription.from_dict(sub.to_dict())
+    assert restored.id == sub.id and restored.seen_ids == {"a", "b"}
+    assert restored.initialized and restored.backfill == "recent" and restored.backfill_count == 3
+    assert restored.total_queued == 2
+
+
+def test_backfill_count_is_clamped_on_construction():
+    assert webui.Subscription("https://example.com/c", {}, backfill_count=0).backfill_count == 1
+    assert webui.Subscription("https://example.com/c", {}, backfill_count=9999).backfill_count == webui.BACKFILL_MAX
+
+
+def test_first_check_with_no_backfill_only_records_a_baseline(monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("My Channel", [entry("a"), entry("b")]))
+    sub = webui.Subscription("https://example.com/c", {}, backfill="none")
+    webui.check_subscription(sub)
+    assert sub.title == "My Channel" and sub.initialized and sub.seen_ids == {"a", "b"}
+    assert sub.total_queued == 0 and sub.last_error == "" and sub.last_checked > 0
+    assert len(webui.JOBS) == 0
+
+
+def test_first_check_with_backfill_queues_only_the_requested_count(monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries",
+                        lambda url, args: ("", [entry("a"), entry("b"), entry("c")]))
+    sub = webui.Subscription("https://example.com/c", {}, backfill="recent", backfill_count=2)
+    webui.check_subscription(sub)
+    assert sub.total_queued == 2 and sub.seen_ids == {"a", "b", "c"}
+    queued_urls = {j.url for j in webui.JOBS.values()}
+    assert queued_urls == {"https://example.com/watch?v=a", "https://example.com/watch?v=b"}
+    assert all(j.source == sub.id for j in webui.JOBS.values())
+
+
+def test_later_check_only_queues_ids_not_seen_before(monkeypatch):
+    sub = webui.Subscription("https://example.com/c", {}, backfill="none")
+    sub.initialized = True
+    sub.seen_ids = {"a", "b"}
+    monkeypatch.setattr(webui, "list_flat_entries",
+                        lambda url, args: ("", [entry("a"), entry("b"), entry("c")]))
+    webui.check_subscription(sub)
+    assert sub.seen_ids == {"a", "b", "c"} and sub.total_queued == 1
+    assert [j.url for j in webui.JOBS.values()] == ["https://example.com/watch?v=c"]
+
+
+def test_a_failed_check_records_the_error_without_crashing(monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: (_ for _ in ()).throw(RuntimeError("boom")))
+    sub = webui.Subscription("https://example.com/c", {})
+    webui.check_subscription(sub)
+    assert "boom" in sub.last_error and not sub.initialized and sub.last_checked > 0
+
+
+def test_check_subscription_is_reentrant_safe(monkeypatch):
+    """A check already in progress for a subscription is skipped, not run twice."""
+    calls = []
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: (calls.append(1), ("", []))[1])
+    sub = webui.Subscription("https://example.com/c", {})
+    webui._CHECKING.add(sub.id)
+    webui.check_subscription(sub)
+    assert calls == []  # skipped entirely
+    webui._CHECKING.discard(sub.id)
+
+
+def test_concurrent_subscription_checks_only_run_once(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def slow_list(url, args):
+        calls.append(1)
+        entered.set()
+        assert release.wait(1.0)
+        return "", []
+
+    monkeypatch.setattr(webui, "list_flat_entries", slow_list)
+    sub = webui.Subscription("https://example.com/c", {})
+    first = threading.Thread(target=webui.check_subscription, args=(sub,))
+    first.start()
+    assert entered.wait(1.0)
+    second = threading.Thread(target=webui.check_subscription, args=(sub,))
+    second.start()
+    second.join(1.0)
+    release.set()
+    first.join(1.0)
+    assert not first.is_alive() and not second.is_alive()
+    assert calls == [1]
+
+
+def test_subscriptions_persist_across_a_save_and_load_cycle():
+    sub = webui.Subscription("https://example.com/c", {"mode": "mp3"}, backfill="recent", backfill_count=4)
+    sub.seen_ids = {"x", "y"}
+    webui.SUBS[sub.id] = sub
+    webui.save_subscriptions()
+    webui.SUBS.clear()
+    webui.load_subscriptions()
+    assert sub.id in webui.SUBS and webui.SUBS[sub.id].seen_ids == {"x", "y"}
+
+
+def test_job_records_the_subscription_that_queued_it_and_it_survives_history_reload():
+    job = webui.Job("https://example.com/v", {})
+    job.source = "abcd1234"
+    restored = webui.Job.from_dict(job.to_dict(webui.ROOT) | {"status": "done"}, webui.ROOT)
+    assert restored.source == "abcd1234"
+    assert job.view(webui.ROOT)["source"] == "abcd1234"
+
+
+# ── HTTP endpoints ──
+def test_add_subscription_validates_the_url(server):
+    assert call(server, "/api/subscriptions", {"url": "not a url"})[0] == 400
+
+
+def test_add_subscription_ignores_options_that_are_not_an_object(server, monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", []))
+    status, view = call(server, "/api/subscriptions", {
+        "url": "https://example.com/c",
+        "options": "mp3",
+    })
+    assert status == 200 and view["options"] == {}
+
+
+def test_add_subscription_starts_an_immediate_background_check(server, monkeypatch):
+    checked = threading.Event()
+
+    def list_entries(url, args):
+        checked.set()
+        return "Channel Name", [entry("a")]
+
+    monkeypatch.setattr(webui, "list_flat_entries", list_entries)
+    status, sub = call(server, "/api/subscriptions", {"url": "https://example.com/c", "backfill": "none"})
+    assert status == 200 and sub["id"] in webui.SUBS
+    assert checked.wait(1.0)
+    for _ in range(100):
+        if not webui.SUBSCRIPTION_MANAGER.is_checking(sub["id"]):
+            break
+        threading.Event().wait(0.01)
+    assert not webui.SUBSCRIPTION_MANAGER.is_checking(sub["id"])
+
+
+def test_add_subscription_does_not_wait_for_a_slow_remote_check(server, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_list(url, args):
+        entered.set()
+        assert release.wait(1.0)
+        return "", []
+
+    monkeypatch.setattr(webui, "list_flat_entries", slow_list)
+    status, sub = call(server, "/api/subscriptions", {"url": "https://example.com/c"})
+    assert status == 200 and sub["id"] in webui.SUBS
+    assert entered.wait(1.0)
+    release.set()
+    for _ in range(100):
+        if not webui.SUBSCRIPTION_MANAGER.is_checking(sub["id"]):
+            break
+        threading.Event().wait(0.01)
+    assert not webui.SUBSCRIPTION_MANAGER.is_checking(sub["id"])
+
+
+def test_update_subscription_toggles_enabled_and_clamps_backfill_count(server, monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", []))
+    sub_id = call(server, "/api/subscriptions", {"url": "https://example.com/c"})[1]["id"]
+    status, updated = call(server, f"/api/subscriptions/{sub_id}/update", {"enabled": False, "backfill_count": 9999})
+    assert status == 200 and updated["enabled"] is False
+    assert webui.SUBS[sub_id].backfill_count == webui.BACKFILL_MAX
+
+
+def test_update_subscription_rejects_non_boolean_enabled(server, monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", []))
+    sub_id = call(server, "/api/subscriptions", {"url": "https://example.com/c"})[1]["id"]
+    status, _ = call(server, f"/api/subscriptions/{sub_id}/update", {"enabled": "false"})
+    assert status == 400
+    assert webui.SUBS[sub_id].enabled is True
+
+
+def test_check_now_runs_in_the_background_without_blocking_the_request(server, monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", []))
+    sub_id = call(server, "/api/subscriptions", {"url": "https://example.com/c"})[1]["id"]
+    started = threading.Event()
+
+    def slow_list(url, args):
+        started.set()
+        threading.Event().wait(0.3)
+        return "", []
+
+    monkeypatch.setattr(webui, "list_flat_entries", slow_list)
+    status, _ = call(server, f"/api/subscriptions/{sub_id}/check-now", {})
+    assert status == 200
+    assert started.wait(1.0)
+
+
+def test_remove_subscription(server, monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", []))
+    sub_id = call(server, "/api/subscriptions", {"url": "https://example.com/c"})[1]["id"]
+    assert call(server, f"/api/subscriptions/{sub_id}/remove", {})[0] == 200
+    assert sub_id not in webui.SUBS
+
+
+def test_removing_a_subscription_while_it_is_checking_prevents_new_jobs(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    sub = webui.Subscription("https://example.com/c", {}, backfill="recent", backfill_count=1)
+    webui.SUBSCRIPTION_MANAGER.add(sub)
+
+    def slow_list(url, args):
+        entered.set()
+        assert release.wait(1.0)
+        return "", [entry("new")]
+
+    monkeypatch.setattr(webui, "list_flat_entries", slow_list)
+    check = threading.Thread(target=webui.check_subscription, args=(sub,))
+    check.start()
+    assert entered.wait(1.0)
+    assert webui.SUBSCRIPTION_MANAGER.remove(sub.id)
+    release.set()
+    check.join(1.0)
+    assert not check.is_alive()
+    assert webui.JOB_MANAGER.snapshot() == []
+
+
+def test_actions_on_an_unknown_subscription_id_return_404(server):
+    assert call(server, "/api/subscriptions/deadbeef/check-now", {})[0] == 404
+
+
+def test_list_subscriptions_endpoint(server, monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("Chan", []))
+    call(server, "/api/subscriptions", {"url": "https://example.com/c"})
+    status, data = call(server, "/api/subscriptions")
+    assert status == 200 and len(data["subscriptions"]) == 1 and data["subscriptions"][0]["title"] == "Chan"
+
+
+# ── editing a subscription's download settings ──
+def test_subscription_view_includes_the_full_settings(server, monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", []))
+    opts = {"mode": "mp3", "abr": 320, "subs": True, "proxy": "http://127.0.0.1:7890"}
+    view = call(server, "/api/subscriptions", {"url": "https://example.com/c", "options": opts})[1]
+    assert view["options"] == opts and view["mode"] == "mp3"
+    listed = call(server, "/api/subscriptions")[1]["subscriptions"][0]
+    assert listed["options"] == opts
+
+
+def test_updating_options_replaces_the_whole_settings_object_and_persists(server, monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", []))
+    sub_id = call(server, "/api/subscriptions", {"url": "https://example.com/c", "options": {"mode": "mp4", "quality": "1080"}})[1]["id"]
+    new = {"mode": "mp3", "abr": 128}
+    status, view = call(server, f"/api/subscriptions/{sub_id}/update", {"options": new})
+    assert status == 200 and view["options"] == new and view["mode"] == "mp3"
+    # survives a restart
+    webui.SUBS.clear()
+    webui.load_subscriptions()
+    assert webui.SUBS[sub_id].options == new
+
+
+def test_an_options_update_that_is_not_an_object_is_ignored(server, monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", []))
+    sub_id = call(server, "/api/subscriptions", {"url": "https://example.com/c", "options": {"mode": "mp4"}})[1]["id"]
+    call(server, f"/api/subscriptions/{sub_id}/update", {"options": "mp3"})
+    assert webui.SUBS[sub_id].options == {"mode": "mp4"}
+
+
+def test_videos_queued_after_an_edit_use_the_new_settings_but_earlier_jobs_keep_theirs(server, monkeypatch):
+    sub = webui.Subscription("https://example.com/c", {"mode": "mp4", "quality": "1080"}, backfill="recent", backfill_count=1)
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", [entry("a")]))
+    webui.check_subscription(sub)                                 # first check backfills video "a" with the old settings
+    webui.SUBS[sub.id] = sub
+    call(server, f"/api/subscriptions/{sub.id}/update", {"options": {"mode": "mp3", "abr": 128}})
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", [entry("b"), entry("a")]))
+    webui.check_subscription(sub)                                 # a new video "b" appears
+    by_url = {j.url: j.options for j in webui.JOBS.values()}
+    assert by_url["https://example.com/watch?v=a"] == {"mode": "mp4", "quality": "1080"}
+    assert by_url["https://example.com/watch?v=b"] == {"mode": "mp3", "abr": 128}
+
+
+# ── an incomplete webui_dist must be reported, not silently ignored ──
+def make_dist(root, *, index=True, assets=("index-abc.js", "index-abc.css")):
+    root.mkdir(parents=True, exist_ok=True)
+    if index:
+        (root / "index.html").write_text(
+            '<html><head><script type="module" src="/assets/index-abc.js"></script>'
+            '<link rel="stylesheet" href="/assets/index-abc.css"></head></html>', encoding="utf-8")
+    (root / "assets").mkdir(exist_ok=True)
+    for name in assets:
+        (root / "assets" / name).write_text("x", encoding="utf-8")
+    return root
+
+
+def test_check_dist_accepts_a_complete_build(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "UI_DIST", make_dist(tmp_path / "webui_dist"))
+    assert webui.check_dist() == (True, "")
+
+
+def test_check_dist_reports_a_missing_index(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "UI_DIST", make_dist(tmp_path / "webui_dist", index=False))
+    ok, why = webui.check_dist()
+    assert not ok and "index.html" in why
+
+
+def test_check_dist_names_the_asset_that_is_in_the_wrong_place(tmp_path, monkeypatch):
+    """The real mistake: the .js file ended up beside grab.py instead of inside webui_dist/assets/."""
+    monkeypatch.setattr(webui, "UI_DIST", make_dist(tmp_path / "webui_dist", assets=("index-abc.css",)))
+    ok, why = webui.check_dist()
+    assert not ok and "webui_dist/assets/index-abc.js" in why and "index-abc.css" not in why
+
+
+def test_diagnostics_warn_when_the_interface_files_are_incomplete(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "UI_DIST", make_dist(tmp_path / "webui_dist", assets=()))
+    item = {c["id"]: c for c in webui.collect_doctor(force=True)["checks"]}["interface"]
+    assert item["status"] == "warn" and "assets" in item["detail"]
+
+
+def test_diagnostics_are_happy_when_the_interface_files_are_complete(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "UI_DIST", make_dist(tmp_path / "webui_dist"))
+    assert {c["id"]: c for c in webui.collect_doctor(force=True)["checks"]}["interface"]["status"] == "ok"

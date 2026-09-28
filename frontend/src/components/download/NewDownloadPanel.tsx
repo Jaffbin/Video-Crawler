@@ -3,15 +3,17 @@ import { useCallback, useRef, useState } from 'react'
 import { createJobs, probe } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
 import { useUrlImport } from '../../hooks/useUrlImport'
-import { BITRATES, loadOptions, saveOptions } from '../../lib/options'
 import { extractUrls, looksLikeTextFile, mergeUrls, readUrls } from '../../lib/urls'
 import type { DownloadOptions, ProbeResult } from '../../types/api'
 import { Button } from '../ui/Button'
-import { Segmented } from '../ui/Segmented'
 import { AdvancedSettings } from './AdvancedSettings'
+import { FormatQualityFields } from './FormatQualityFields'
 import { ProbeCard } from './ProbeCard'
 
 interface Props {
+  /** Download settings, owned by App so the subscription form always sees the same values. */
+  options: DownloadOptions
+  onOptionsChange: (patch: Partial<DownloadOptions>) => void
   playwright: boolean
   onToast: ToastFn
   /** Called after jobs were created, so the queue can refresh at once. */
@@ -40,22 +42,13 @@ const Toggle = ({
   </label>
 )
 
-export function NewDownloadPanel({ playwright, onToast, onAdded }: Props) {
+export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, onToast, onAdded }: Props) {
   const [urls, setUrls] = useState('')
-  const [options, setOptions] = useState<DownloadOptions>(loadOptions)
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null)
   const [busy, setBusy] = useState<'probe' | 'add' | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const urlsRef = useRef(urls)
   urlsRef.current = urls
-
-  const patch = useCallback((change: Partial<DownloadOptions>) => {
-    setOptions((current) => {
-      const next = { ...current, ...change }
-      saveOptions(next)
-      return next
-    })
-  }, [])
 
   const addUrls = useCallback(
     (found: string[], source: string) => {
@@ -200,77 +193,13 @@ export function NewDownloadPanel({ playwright, onToast, onAdded }: Props) {
         />
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="control">
-          <span id="format-label">Format</span>
-          <Segmented
-            label="Output format"
-            value={options.mode}
-            onChange={(mode) => patch({ mode })}
-            options={[
-              { value: 'mp4', label: 'MP4 video' },
-              { value: 'mp3', label: 'MP3 audio' },
-            ]}
-          />
-        </div>
-        {mp3 ? (
-          <label className="control">
-            <span>Output bitrate</span>
-            <select
-              className="field"
-              value={options.abr}
-              onChange={(e) => patch({ abr: Number(e.target.value) })}
-            >
-              {BITRATES.map((b) => (
-                <option key={b} value={b}>
-                  {b} kbps
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <label className="control">
-            <span>Maximum video quality</span>
-
-            <select
-              className="field"
-              value={options.quality}
-              onChange={(e) => patch({ quality: e.target.value })}
-            >
-              <option value="best">Best available</option>
-
-              {availableHeights.map((height) => (
-                <option key={height} value={String(height)}>
-                  {height}p
-                </option>
-              ))}
-
-              {!probeResult && (
-                <>
-                  <option value="2160">2160p</option>
-                  <option value="1440">1440p</option>
-                  <option value="1080">1080p</option>
-                  <option value="720">720p</option>
-                  <option value="480">480p</option>
-                  <option value="360">360p</option>
-                </>
-              )}
-            </select>
-
-            {probeResult && availableHeights.length > 0 && (
-              <span className="text-[11px] text-zinc-500">
-                {availableHeights.length} resolutions detected
-              </span>
-            )}
-
-            {!probeResult && (
-              <span className="text-[11px] text-zinc-500">
-                Analyze the link to see available resolutions
-              </span>
-            )}
-          </label>
-        )}
-      </div>
+      <FormatQualityFields
+        options={options}
+        onChange={patch}
+        availableHeights={availableHeights}
+        analyzed={!!probeResult}
+        showAnalyzeHint
+      />
 
       <div className="grid gap-2">
         {!mp3 && (

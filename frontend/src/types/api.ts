@@ -132,3 +132,28 @@ export interface UpdateStatus {
 }
 
 export type ComponentExtras = 'default' | 'default,deno'
+
+export type BackfillMode = 'none' | 'recent'
+
+export interface Subscription {
+  id: string
+  url: string
+  title: string
+  enabled: boolean
+  backfill: BackfillMode
+  backfill_count: number
+  mode: DownloadMode
+  /** The full download settings this subscription uses for every video it queues. */
+  options: DownloadOptions
+  created: number
+  last_checked: number
+  last_error: string
+  total_queued: number
+  next_check: number | null
+  checking: boolean
+}
+
+export interface SubscriptionsResponse {
+  subscriptions: Subscription[]
+  interval_seconds: number
+}
