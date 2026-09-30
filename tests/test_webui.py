@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 import types
@@ -167,6 +168,19 @@ def test_page_javascript_has_valid_syntax():
 ])
 def test_friendly_error(raw, needle):
     assert needle in webui.friendly_error(raw)
+
+
+def test_error_details_are_structured_and_actionable():
+    details = webui.error_details("ERROR: The read operation timed out")
+    assert details["kind"] == "network"
+    assert details["message"] and "Diagnostics" in details["hint"]
+
+
+def test_missing_impersonation_has_a_distinct_fix(monkeypatch):
+    monkeypatch.setattr(webui.importlib.util, "find_spec", lambda name: None)
+    details = webui.error_details("ERROR: HTTP Error 403: Forbidden")
+    assert details["kind"] == "impersonation_missing"
+    assert "install" in details["hint"]
 
 
 def test_a_random_mention_of_cookies_is_not_reported_as_a_login_problem():
@@ -528,15 +542,85 @@ def test_subscription_round_trips_through_to_dict_and_from_dict():
     sub.seen_ids = {"a", "b"}
     sub.initialized = True
     sub.total_queued = 2
+    sub.last_error_kind = "network"
     restored = webui.Subscription.from_dict(sub.to_dict())
     assert restored.id == sub.id and restored.seen_ids == {"a", "b"}
     assert restored.initialized and restored.backfill == "recent" and restored.backfill_count == 3
     assert restored.total_queued == 2
+    assert restored.last_error_kind == "network"
+    assert restored.view(300, False)["last_error_kind"] == "network"
 
 
 def test_backfill_count_is_clamped_on_construction():
     assert webui.Subscription("https://example.com/c", {}, backfill_count=0).backfill_count == 1
     assert webui.Subscription("https://example.com/c", {}, backfill_count=9999).backfill_count == webui.BACKFILL_MAX
+
+
+def test_subscription_filters_are_normalized_and_round_trip():
+    sub = webui.Subscription("https://example.com/c", {}, filters={
+        "include_keywords": "Cat, cat, Dog",
+        "exclude_keywords": ["spoiler"],
+        "exclude_live": True,
+        "min_duration": 600,
+        "max_duration": 60,
+    })
+    assert sub.filters["include_keywords"] == ["Cat", "Dog"]
+    assert (sub.filters["min_duration"], sub.filters["max_duration"]) == (60, 600)
+    restored = webui.Subscription.from_dict(sub.to_dict())
+    assert restored.filters == sub.filters
+
+
+def test_subscription_filter_matches_title_kind_and_duration():
+    entries = [
+        {**entry("a", "Weekly cat"), "duration": 120, "is_live": False, "is_short": False},
+        {**entry("b", "Weekly dog"), "duration": 120, "is_live": False, "is_short": False},
+        {**entry("c", "Cat livestream"), "duration": None, "is_live": True, "is_short": False},
+        {**entry("d", "Cat clip"), "duration": 20, "is_live": False, "is_short": True},
+    ]
+    accepted, skipped = webui.filter_subscription_entries(entries, {
+        "include_keywords": ["cat"], "exclude_live": True, "exclude_shorts": True, "min_duration": 60,
+    })
+    assert [item["id"] for item in accepted] == ["a"]
+    assert [item["id"] for item in skipped] == ["b", "c", "d"]
+
+
+def test_preview_subscription_is_read_only_and_explains_filter_reason(monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: (
+        "Channel", [entry("a", "Cat tutorial"), entry("b", "Dog tutorial")],
+    ))
+    sub = webui.Subscription("https://example.com/c", {}, backfill="recent", backfill_count=2)
+    before = sub.to_dict()
+    preview = webui.preview_subscription(sub, {"include_keywords": ["cat"]})
+    assert preview["total_candidates"] == 2
+    assert (preview["would_queue"], preview["filtered"]) == (1, 1)
+    assert [(item["eligible"], item["reason"]) for item in preview["items"]] == [
+        (True, None), (True, "include_keywords"),
+    ]
+    assert sub.to_dict() == before and len(webui.JOBS) == 0
+
+
+def test_preview_without_backfill_shows_baseline_without_queuing(monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", [entry("a")]))
+    sub = webui.Subscription("https://example.com/c", {}, backfill="none")
+    preview = webui.preview_subscription(sub, {})
+    assert preview["total_candidates"] == 0
+    assert (preview["would_queue"], preview["filtered"]) == (0, 0)
+    assert preview["items"][0]["eligible"] is False
+
+
+def test_filtered_new_subscription_items_are_seen_but_not_queued(monkeypatch):
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: (
+        "", [{**entry("a", "Keep this"), "duration": 90, "is_live": False, "is_short": False},
+             {**entry("b", "Skip this"), "duration": 90, "is_live": False, "is_short": False}],
+    ))
+    sub = webui.Subscription(
+        "https://example.com/c", {}, backfill="recent", backfill_count=2,
+        filters={"include_keywords": ["keep"]},
+    )
+    webui.check_subscription(sub)
+    assert sub.seen_ids == {"a", "b"}
+    assert sub.total_queued == 1 and sub.total_filtered == 1
+    assert [job.url for job in webui.JOBS.values()] == ["https://example.com/watch?v=a"]
 
 
 def test_first_check_with_no_backfill_only_records_a_baseline(monkeypatch):
@@ -575,6 +659,7 @@ def test_a_failed_check_records_the_error_without_crashing(monkeypatch):
     sub = webui.Subscription("https://example.com/c", {})
     webui.check_subscription(sub)
     assert "boom" in sub.last_error and not sub.initialized and sub.last_checked > 0
+    assert sub.last_error_kind == "unknown"
 
 
 def test_check_subscription_is_reentrant_safe(monkeypatch):
@@ -690,6 +775,40 @@ def test_update_subscription_toggles_enabled_and_clamps_backfill_count(server, m
     assert webui.SUBS[sub_id].backfill_count == webui.BACKFILL_MAX
 
 
+def test_add_and_update_subscription_filters(server, monkeypatch):
+    monkeypatch.setattr(webui, "start_subscription_check", lambda sub: None)
+    status, created = call(server, "/api/subscriptions", {
+        "url": "https://example.com/c",
+        "filters": {"include_keywords": "cat, dog", "exclude_live": True, "min_duration": 120},
+    })
+    assert status == 200
+    assert created["filters"]["include_keywords"] == ["cat", "dog"]
+    status, updated = call(server, f"/api/subscriptions/{created['id']}/update", {
+        "filters": {"exclude_keywords": ["trailer"], "max_duration": 3600},
+    })
+    assert status == 200
+    assert updated["filters"]["exclude_keywords"] == ["trailer"]
+    assert updated["filters"]["max_duration"] == 3600
+
+
+def test_update_subscription_rejects_non_object_filters(server, monkeypatch):
+    monkeypatch.setattr(webui, "start_subscription_check", lambda sub: None)
+    sub_id = call(server, "/api/subscriptions", {"url": "https://example.com/c"})[1]["id"]
+    assert call(server, f"/api/subscriptions/{sub_id}/update", {"filters": "all"})[0] == 400
+
+
+def test_subscription_preview_endpoint_does_not_save_or_enqueue(server, monkeypatch):
+    monkeypatch.setattr(webui, "start_subscription_check", lambda sub: None)
+    monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("Channel", [entry("a", "Cat")]))
+    sub_id = call(server, "/api/subscriptions", {
+        "url": "https://example.com/c", "backfill": "recent", "backfill_count": 1,
+    })[1]["id"]
+    before = webui.SUBS[sub_id].to_dict()
+    status, preview = call(server, f"/api/subscriptions/{sub_id}/preview", {"filters": {"exclude_keywords": ["Cat"]}})
+    assert status == 200 and preview["items"][0]["reason"] == "exclude_keywords"
+    assert webui.SUBS[sub_id].to_dict() == before and not webui.JOBS
+
+
 def test_update_subscription_rejects_non_boolean_enabled(server, monkeypatch):
     monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("", []))
     sub_id = call(server, "/api/subscriptions", {"url": "https://example.com/c"})[1]["id"]
@@ -749,7 +868,12 @@ def test_actions_on_an_unknown_subscription_id_return_404(server):
 def test_list_subscriptions_endpoint(server, monkeypatch):
     monkeypatch.setattr(webui, "list_flat_entries", lambda url, args: ("Chan", []))
     call(server, "/api/subscriptions", {"url": "https://example.com/c"})
-    status, data = call(server, "/api/subscriptions")
+    deadline = time.monotonic() + 2
+    while True:
+        status, data = call(server, "/api/subscriptions")
+        if data["subscriptions"][0]["last_checked"] or time.monotonic() >= deadline:
+            break
+        threading.Event().wait(0.01)
     assert status == 200 and len(data["subscriptions"]) == 1 and data["subscriptions"][0]["title"] == "Chan"
 
 

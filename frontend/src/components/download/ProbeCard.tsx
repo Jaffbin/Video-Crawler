@@ -1,6 +1,7 @@
 import { Check, Image as ImageIcon, ListVideo } from 'lucide-react'
 import type { ProbeResult } from '../../types/api'
 import { formatDuration } from '../../lib/utils'
+import { useI18n } from '../../i18n'
 
 interface Props {
   probe: ProbeResult
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function ProbeCard({ probe, quality, onPickQuality }: Props) {
+  const { t } = useI18n()
   if (probe.error) {
     return (
       <div
@@ -40,13 +42,15 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div className="mb-1 text-xs uppercase tracking-wider text-zinc-400">{probe.kind ?? 'media'}</div>
-          <h3 className="line-clamp-2 text-sm font-medium text-zinc-100">{probe.title || 'Untitled'}</h3>
+          <div className="mb-1 text-xs uppercase tracking-wider text-zinc-400">
+            {t(probe.kind ?? 'media')}
+          </div>
+          <h3 className="line-clamp-2 text-sm font-medium text-zinc-100">{probe.title || t('Untitled')}</h3>
           {meta.length > 0 && <p className="mt-1 text-xs text-zinc-400">{meta.join(' · ')}</p>}
           {probe.kind === 'playlist' && probe.count != null && (
             <p className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
               <ListVideo aria-hidden size={13} />
-              {probe.count} items. Use “Playlist range” in Advanced settings to download only some.
+              {t('{count} items. Use Playlist range to download only some.', { count: probe.count })}
             </p>
           )}
         </div>
@@ -55,7 +59,7 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
       {probe.items && probe.items.length > 0 && (
         <div className="border-t border-white/8 px-4 py-3">
           <div className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-400">
-            Playlist preview
+            {t('Playlist preview')}
           </div>
 
           <ul className="max-h-40 space-y-0.5 overflow-auto text-xs text-zinc-400">
@@ -67,7 +71,9 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
           </ul>
 
           {probe.items.length > 10 && (
-            <p className="mt-2 text-xs text-zinc-500">+{probe.items.length - 10} more items</p>
+            <p className="mt-2 text-xs text-zinc-500">
+              {t('+{count} more items', { count: probe.items.length - 10 })}
+            </p>
           )}
         </div>
       )}
@@ -75,7 +81,7 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
       {probe.heights && probe.heights.length > 0 && (
         <div className="border-t border-white/8 px-4 py-3">
           <div className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-400">
-            Available quality
+            {t('Available quality')}
           </div>
           <div className="flex flex-wrap gap-2">
             {probe.heights.slice(0, 8).map((h) => {
@@ -100,9 +106,10 @@ export function ProbeCard({ probe, quality, onPickQuality }: Props) {
 
       {probe.sources && probe.sources.length > 0 && (
         <div className="border-t border-white/8 px-4 py-3 text-xs text-zinc-400">
-          {probe.count ?? probe.sources.length} media source
-          {(probe.count ?? probe.sources.length) > 1 ? 's' : ''} detected
-          {probe.rendered ? ' using page rendering.' : '.'}
+          {t('{count} media sources detected{rendered}', {
+            count: probe.count ?? probe.sources.length,
+            rendered: probe.rendered ? t(' using page rendering.') : '.',
+          })}
         </div>
       )}
     </div>

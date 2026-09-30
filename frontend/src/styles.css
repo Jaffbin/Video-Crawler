@@ -87,6 +87,13 @@ a {
 }
 select.field {
   appearance: auto;
+  color-scheme: dark;
+  background-color: #18181b;
+  color: #f4f4f5;
+}
+select.field option {
+  background-color: #18181b;
+  color: #f4f4f5;
 }
 
 .control {

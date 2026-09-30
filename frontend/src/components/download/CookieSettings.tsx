@@ -3,6 +3,7 @@ import { deleteCookies, getCookies, uploadCookies } from '../../api/client'
 import { BROWSERS } from '../../lib/options'
 import type { ToastFn } from '../../hooks/useToasts'
 import type { CookieStatus, DownloadOptions } from '../../types/api'
+import { useI18n } from '../../i18n'
 
 interface Props {
   options: DownloadOptions
@@ -22,6 +23,7 @@ export function describeCookies(c: CookieStatus): string {
 }
 
 export function CookieSettings({ options, onChange, onToast }: Props) {
+  const { t } = useI18n()
   const [status, setStatus] = useState<CookieStatus>({ present: false })
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -37,16 +39,33 @@ export function CookieSettings({ options, onChange, onToast }: Props) {
   }, [])
 
   const selected = options.use_cookies_file ? 'file' : options.cookies_from_browser
+  const cookieStatus = !status.present
+    ? t('No cookies.txt uploaded.')
+    : [
+        t('{cookies} cookies for {sites} sites', {
+          cookies: status.cookies ?? 0,
+          sites: status.domain_count ?? 0,
+        }),
+        status.expired ? t('{count} already expired', { count: status.expired }) : '',
+        status.has_youtube
+          ? t(status.youtube_login ? 'YouTube sign-in found' : 'No YouTube sign-in cookies')
+          : '',
+        status.has_bilibili
+          ? t(status.bilibili_login ? 'Bilibili sign-in found' : 'No Bilibili sign-in cookie')
+          : '',
+      ]
+        .filter(Boolean)
+        .join('; ') + '.'
 
   async function upload(file: File) {
     if (file.size > 3_000_000)
-      return onToast('That file is larger than 3 MB, so it is probably not a cookies.txt.', true)
+      return onToast(t('That file is larger than 3 MB, so it is probably not a cookies.txt.'), true)
     try {
       setStatus(await uploadCookies(await file.text()))
       onChange({ use_cookies_file: true, cookies_from_browser: '' })
-      onToast('cookies.txt uploaded')
+      onToast(t('cookies.txt uploaded'))
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'Upload failed', true)
+      onToast(e instanceof Error ? e.message : t('Upload failed'), true)
     }
   }
 
@@ -54,16 +73,16 @@ export function CookieSettings({ options, onChange, onToast }: Props) {
     try {
       setStatus(await deleteCookies())
       onChange({ use_cookies_file: false })
-      onToast('cookies.txt removed')
+      onToast(t('cookies.txt removed'))
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'Could not remove the file', true)
+      onToast(e instanceof Error ? e.message : t('Could not remove the file'), true)
     }
   }
 
   return (
     <div className="grid gap-2">
       <label className="control">
-        <span>Cookies (for logged-in or member-only videos)</span>
+        <span>{t('Cookies (for logged-in or member-only videos)')}</span>
         <select
           className="field"
           value={selected}
@@ -76,11 +95,11 @@ export function CookieSettings({ options, onChange, onToast }: Props) {
             )
           }}
         >
-          <option value="">No cookies</option>
+          <option value="">{t('No cookies')}</option>
           <option value="file" disabled={!status.present}>
-            Uploaded cookies.txt
+            {t('Uploaded cookies.txt')}
           </option>
-          <optgroup label="Read from a browser">
+          <optgroup label={t('Read from a browser')}>
             {BROWSERS.map((b) => (
               <option key={b} value={b}>
                 {b[0].toUpperCase() + b.slice(1)}
@@ -92,14 +111,14 @@ export function CookieSettings({ options, onChange, onToast }: Props) {
 
       <div className="rounded-xl bg-white/[.035] px-3 py-2 text-xs text-zinc-300">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span>{describeCookies(status)}</span>
+          <span>{cookieStatus}</span>
           <span className="flex gap-2">
             <button
               type="button"
               className="rounded-lg bg-white/[.06] px-2.5 py-1.5 hover:bg-white/[.1]"
               onClick={() => fileInput.current?.click()}
             >
-              Upload cookies.txt
+              {t('Upload cookies.txt')}
             </button>
             {status.present && (
               <button
@@ -107,7 +126,7 @@ export function CookieSettings({ options, onChange, onToast }: Props) {
                 className="rounded-lg px-2.5 py-1.5 text-red-300 hover:bg-white/[.06]"
                 onClick={remove}
               >
-                Remove
+                {t('Remove')}
               </button>
             )}
           </span>
@@ -125,18 +144,19 @@ export function CookieSettings({ options, onChange, onToast }: Props) {
           }}
         />
         <p className="mt-2 leading-5 text-zinc-400">
-          Reading cookies straight from Chrome or Edge can fail on Windows while the browser is open; an
-          exported cookies.txt avoids that. YouTube rotates account cookies, so export from a private window
-          and do not reuse that window afterwards (
+          {t(
+            'Reading browser cookies can fail while the browser is open. Exporting cookies.txt avoids this. For YouTube, export from a private window and do not reuse that window afterwards.',
+          )}{' '}
+          (
           <a
             className="underline"
             href="https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies"
             target="_blank"
             rel="noreferrer"
           >
-            how to export
+            {t('how to export')}
           </a>
-          ). The file is stored outside your download folder and every run works on its own copy.
+          ). {t('The file is stored outside your download folder and each run uses its own copy.')}
         </p>
       </div>
     </div>

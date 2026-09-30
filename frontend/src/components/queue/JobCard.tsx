@@ -4,6 +4,7 @@ import { fileUrl, getLog, jobAction, openFile, openFolder } from '../../api/clie
 import type { ToastFn } from '../../hooks/useToasts'
 import { cn, formatDate } from '../../lib/utils'
 import type { Job, JobStatus } from '../../types/api'
+import { useI18n } from '../../i18n'
 
 interface Props {
   job: Job
@@ -32,6 +33,7 @@ const LABEL: Record<JobStatus, string> = {
 const CANCELING = 'Canceling…'
 
 export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
+  const { t } = useI18n()
   const [logOpen, setLogOpen] = useState(false)
   const [log, setLog] = useState<string[]>([])
   const logId = useId()
@@ -39,6 +41,12 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
   const canceling = job.stage === CANCELING
   const percent = job.status === 'done' ? 100 : Math.max(0, Math.min(100, job.percent))
   const fullBar = job.status !== 'running'
+  const errorHintKey = job.error_kind ? `error.${job.error_kind}` : ''
+  const localizedErrorHint =
+    errorHintKey && t(errorHintKey) !== errorHintKey ? t(errorHintKey) : job.error_hint
+  const errorTitleKey = job.error_kind ? `error.title.${job.error_kind}` : ''
+  const localizedErrorTitle =
+    errorTitleKey && t(errorTitleKey) !== errorTitleKey ? t(errorTitleKey) : job.error
 
   useEffect(() => {
     if (!logOpen) return
@@ -66,7 +74,7 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
       if (message) onToast(message)
       onChanged()
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'That did not work', true)
+      onToast(e instanceof Error ? e.message : t('That did not work'), true)
     }
   }
 
@@ -76,20 +84,20 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
     const [current, total] = item.split('/')
 
     if (!total) {
-      return running ? `Item ${current}` : `${current} items`
+      return running ? t('Item {current}', { current }) : t('{count} items', { count: current })
     }
 
-    return running ? `Item ${current}/${total}` : `${total} items`
+    return running ? t('Item {current}/{total}', { current, total }) : t('{count} items', { count: total })
   }
 
-  const report = (e: unknown) => onToast(e instanceof Error ? e.message : 'Could not open it', true)
+  const report = (e: unknown) => onToast(e instanceof Error ? e.message : t('Could not open it'), true)
   const meta = [
     job.status === 'running' ? job.stage : '',
-    job.status === 'queued' ? 'Waiting in the queue' : '',
-    job.stage === 'Last incomplete' ? 'Interrupted last time' : '',
+    job.status === 'queued' ? t('Waiting in the queue') : '',
+    job.stage === 'Last incomplete' ? t('Interrupted last time') : '',
     formatItemProgress(job.item, job.status === 'running'),
     job.speed,
-    job.eta ? `${job.eta} left` : '',
+    job.eta ? t('{eta} left', { eta: job.eta }) : '',
     !active && job.finished ? formatDate(job.finished) : '',
   ].filter(Boolean)
 
@@ -100,7 +108,7 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
     >
       <div
         role="progressbar"
-        aria-label={`${LABEL[job.status]} ${job.title || job.url}`}
+        aria-label={`${t(LABEL[job.status])} ${job.title || job.url}`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(percent)}
@@ -133,24 +141,31 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
                 (job.status === 'queued' || job.status === 'canceled') && 'text-sm text-zinc-400',
               )}
             >
-              {job.status === 'running' ? `${Math.round(percent)}%` : LABEL[job.status]}
+              {job.status === 'running' ? `${Math.round(percent)}%` : t(LABEL[job.status])}
             </div>
           </div>
         </div>
 
         {job.status === 'error' && job.error && (
-          <p
+          <div
             role="alert"
             className="flex gap-2 rounded-xl bg-red-500/[.08] px-3 py-2 text-xs leading-5 text-red-200"
           >
             <AlertTriangle aria-hidden size={14} className="mt-0.5 shrink-0" />
-            {job.error}
-          </p>
+            <div>
+              <div className="font-medium">{localizedErrorTitle}</div>
+              <div className="mt-1 text-red-100/75">
+                {t('Suggested fix')}: {localizedErrorHint || t('The technical log is available below.')}
+              </div>
+            </div>
+          </div>
         )}
         {job.notes.length > 0 && (
           <ul className="grid gap-1 text-xs leading-5 text-amber-200">
             {job.notes.map((note) => (
-              <li key={note}>Note: {note}</li>
+              <li key={note}>
+                {t('Note')}: {note}
+              </li>
             ))}
           </ul>
         )}
@@ -168,11 +183,11 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
                     className="action-btn"
                     onClick={() => openFile(file.path).catch(report)}
                   >
-                    <Play aria-hidden size={13} /> Open
+                    <Play aria-hidden size={13} /> {t('Open')}
                   </button>
                 ) : (
                   <a className="action-btn" href={fileUrl(file.path)} target="_blank" rel="noreferrer">
-                    <Play aria-hidden size={13} /> Play
+                    <Play aria-hidden size={13} /> {t('Play')}
                   </a>
                 )}
               </li>
@@ -188,21 +203,21 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
             aria-controls={logId}
             onClick={() => setLogOpen(!logOpen)}
           >
-            <ChevronDown aria-hidden size={13} className={logOpen ? 'rotate-180' : ''} /> Log
+            <ChevronDown aria-hidden size={13} className={logOpen ? 'rotate-180' : ''} /> {t('Log')}
           </button>
           <div className="flex flex-wrap gap-1">
             {active && (
               <button type="button" className="action-btn" disabled={canceling} onClick={() => run('cancel')}>
-                <X aria-hidden size={13} /> {canceling ? 'Canceling…' : 'Cancel'}
+                <X aria-hidden size={13} /> {canceling ? t('Canceling…') : t('Cancel')}
               </button>
             )}
             {(job.status === 'error' || job.status === 'canceled') && (
               <button
                 type="button"
                 className="action-btn"
-                onClick={() => run('retry', 'Added to the queue again')}
+                onClick={() => run('retry', t('Added to the queue again'))}
               >
-                <RotateCcw aria-hidden size={13} /> Retry
+                <RotateCcw aria-hidden size={13} /> {t('Retry')}
               </button>
             )}
             {job.status === 'done' && job.files.length > 0 && (
@@ -211,12 +226,12 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
                 className="action-btn"
                 onClick={() => openFolder(job.files[0].path).catch(report)}
               >
-                <FolderOpen aria-hidden size={13} /> Show in folder
+                <FolderOpen aria-hidden size={13} /> {t('Show in folder')}
               </button>
             )}
             {!active && (
               <button type="button" className="action-btn" onClick={() => run('remove')}>
-                <Trash2 aria-hidden size={13} /> Remove
+                <Trash2 aria-hidden size={13} /> {t('Remove')}
               </button>
             )}
           </div>
@@ -227,7 +242,7 @@ export function JobCard({ job, windowMode, onChanged, onToast }: Props) {
             id={logId}
             className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-black/40 p-3 font-mono text-xs leading-5 text-zinc-300"
           >
-            {log.length ? log.join('\n') : 'No log lines yet.'}
+            {log.length ? log.join('\n') : t('No log lines yet.')}
           </pre>
         )}
       </div>

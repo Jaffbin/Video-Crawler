@@ -13,7 +13,10 @@ PyPI when checking for yt-dlp updates.
 - Choose MP4 quality limits or MP3 bitrate.
 - Download subtitles and cover art.
 - Queue several downloads with live progress, cancellation and retry.
-- Subscribe to a channel or playlist and automatically download new entries.
+- Review the success rate plus categorized failures with an actionable suggested fix.
+- Subscribe to a channel or playlist and filter new entries by title, live/Shorts status, or duration.
+- Switch the core interface between English, Simplified Chinese, Traditional Chinese, and Japanese.
+- Use the first-run guide to check local components and test network connectivity.
 - Fall back to static page scanning or optional browser rendering for less common sites.
 - Use a dedicated public-download-page fallback for `hanime1.me`; use yt-dlp's native Iwara extractor
   with browser impersonation support.
@@ -53,7 +56,18 @@ Run `python webui.py --help` for all options (download folder, port, worker coun
 
 **Subscriptions**: add a channel or playlist link in the "Subscriptions" panel to have new videos
 download automatically (checked every 60 minutes by default). New subscriptions only grab videos
-published from then on unless you choose to also back-fill a recent batch when adding one.
+published from then on unless you choose to also back-fill a recent batch when adding one. Filters
+are stored per subscription. Duration filters apply only when the site exposes duration metadata;
+items filtered out are marked as seen so they are not repeatedly reconsidered on every check. Each
+subscription shows the result of its last check. **Preview filters** reads the current listing
+without queuing downloads or changing the seen history; entries outside the current backfill or
+already seen entries are labeled as such. The preview counts all current candidates, including
+matches and filtered entries, even when the displayed list is shortened.
+
+The first-run guide opens automatically for a new, empty installation and can be reopened from
+the sidebar. Its network test reports connectivity without changing Windows DNS or proxy settings.
+The language selector is also in the sidebar (or the mobile header). Technical extractor logs and
+some site-supplied diagnostics remain in their original language.
 
 First thing to do in the app: open **Diagnostics** and follow any "Install now" prompts - it
 checks ffmpeg, the JavaScript runtime and yt-dlp-ejs component YouTube needs, Playwright (for

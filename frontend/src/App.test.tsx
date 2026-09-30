@@ -54,6 +54,16 @@ afterEach(() => {
 })
 
 describe('App', () => {
+  it('offers setup once for an empty installation and remembers dismissal', async () => {
+    mockApi()
+    const user = (await import('@testing-library/user-event')).default.setup()
+    render(<App />)
+    expect(await screen.findByRole('dialog', { name: 'Welcome to Video Grabber' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Start downloading' }))
+    expect(screen.queryByRole('dialog', { name: 'Welcome to Video Grabber' })).toBeNull()
+    expect(localStorage.getItem('grab-setup-seen')).toBe('1')
+  })
+
   it('shows the yt-dlp version once the first state poll resolves', async () => {
     mockApi()
     render(<App />)

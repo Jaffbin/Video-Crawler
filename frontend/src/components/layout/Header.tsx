@@ -1,5 +1,6 @@
 import { Bell, BellRing, FolderOpen, RefreshCw, Stethoscope } from 'lucide-react'
 import { Button } from '../ui/Button'
+import { LOCALES, useI18n } from '../../i18n'
 
 export type NotificationMode = 'server' | 'default' | 'granted' | 'denied' | 'unsupported'
 
@@ -20,9 +21,12 @@ interface Props {
 const Dot = () => <i aria-hidden className="absolute right-1 top-1 size-2 rounded-full bg-amber-400" />
 
 export function Header(p: Props) {
-  const notifyLabel = { default: 'Notify', granted: 'Notifications on', denied: 'Notifications blocked' }[
-    p.notification as 'default' | 'granted' | 'denied'
-  ]
+  const { locale, setLocale, t } = useI18n()
+  const notifyLabel = {
+    default: t('Notify'),
+    granted: t('Notifications on'),
+    denied: t('Notifications blocked'),
+  }[p.notification as 'default' | 'granted' | 'denied']
   return (
     <header className="sticky top-0 z-30 border-b border-white/[.06] bg-[#0b0d10]/85 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-3 px-4 py-3 sm:px-6">
@@ -37,29 +41,46 @@ export function Header(p: Props) {
                 aria-hidden
                 className={`size-1.5 rounded-full ${p.online ? 'bg-emerald-400' : 'bg-red-400'}`}
               />
-              {p.online ? `Local service connected · yt-dlp ${p.version}` : 'Reconnecting…'}
+              {p.online ? `${t('Local service connected')} · yt-dlp ${p.version}` : t('Reconnecting')}
             </div>
           </div>
         </div>
 
-        <nav aria-label="Tools" className="flex items-center gap-1.5">
+        <nav aria-label={t('Tools')} className="flex items-center gap-1.5">
+          <select
+            aria-label={t('Language')}
+            className="field !w-auto !py-1.5 text-xs md:hidden"
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as typeof locale)}
+          >
+            {LOCALES.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
           <Button
             variant="ghost"
             onClick={p.onDoctor}
-            aria-label="Diagnostics"
+            aria-label={t('Diagnostics')}
             className="relative md:hidden"
           >
             <Stethoscope size={16} />
             {p.environmentAttention && <Dot />}
           </Button>
-          <Button variant="ghost" onClick={p.onUpdate} aria-label="Updates" className="relative md:hidden">
+          <Button
+            variant="ghost"
+            onClick={p.onUpdate}
+            aria-label={t('Updates')}
+            className="relative md:hidden"
+          >
             <RefreshCw size={16} />
             {p.updateAttention && <Dot />}
           </Button>
           <Button
             variant="ghost"
             onClick={p.onOpenFolder}
-            aria-label="Open download folder"
+            aria-label={t('Open download folder')}
             className="md:hidden"
           >
             <FolderOpen size={16} />

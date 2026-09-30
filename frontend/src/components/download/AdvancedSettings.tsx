@@ -3,6 +3,7 @@ import { useId, useState, type ReactNode } from 'react'
 import type { ToastFn } from '../../hooks/useToasts'
 import type { DownloadOptions } from '../../types/api'
 import { CookieSettings } from './CookieSettings'
+import { useI18n } from '../../i18n'
 
 interface Props {
   options: DownloadOptions
@@ -47,6 +48,7 @@ const Toggle = ({
 )
 
 export function AdvancedSettings({ options, onChange, onToast, playwright }: Props) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const panelId = useId()
   const number = (v: string) => (v === '' ? 0 : Number(v))
@@ -62,7 +64,7 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
       >
         <span className="flex items-center gap-2 text-sm font-medium">
           <Gauge aria-hidden size={16} className="text-zinc-400" />
-          Advanced settings
+          {t('Advanced settings')}
         </span>
         <ChevronDown
           aria-hidden
@@ -73,13 +75,13 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
 
       {open && (
         <div id={panelId} className="grid gap-5 border-t border-white/8 p-4 lg:grid-cols-2">
-          <Section icon={<Cookie aria-hidden size={14} />} title="Authentication">
+          <Section icon={<Cookie aria-hidden size={14} />} title={t('Authentication')}>
             <CookieSettings options={options} onChange={onChange} onToast={onToast} />
           </Section>
 
-          <Section icon={<Globe2 aria-hidden size={14} />} title="Network">
+          <Section icon={<Globe2 aria-hidden size={14} />} title={t('Network')}>
             <label className="control">
-              <span>Referer (for hotlink protection)</span>
+              <span>{t('Referer (for hotlink protection)')}</span>
               <input
                 className="field"
                 placeholder="https://example.com/"
@@ -88,7 +90,7 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
               />
             </label>
             <label className="control">
-              <span>Proxy</span>
+              <span>{t('Proxy')}</span>
               <input
                 className="field"
                 placeholder="http://127.0.0.1:7890 or socks5://…"
@@ -98,7 +100,7 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
             </label>
             <div className="grid grid-cols-2 gap-2">
               <label className="control">
-                <span>Rate limit</span>
+                <span>{t('Rate limit')}</span>
                 <input
                   className="field"
                   placeholder="e.g. 2M"
@@ -107,7 +109,7 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
                 />
               </label>
               <label className="control">
-                <span>Concurrent fragments</span>
+                <span>{t('Concurrent fragments')}</span>
                 <input
                   className="field"
                   type="number"
@@ -119,7 +121,7 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
               </label>
             </div>
             <label className="control">
-              <span>Wait between downloads (seconds)</span>
+              <span>{t('Wait between downloads (seconds)')}</span>
               <input
                 className="field"
                 type="number"
@@ -132,9 +134,9 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
             </label>
           </Section>
 
-          <Section icon={<ListVideo aria-hidden size={14} />} title="Batch">
+          <Section icon={<ListVideo aria-hidden size={14} />} title={t('Batch')}>
             <label className="control">
-              <span>Playlist range (empty means all)</span>
+              <span>{t('Playlist range (empty means all)')}</span>
               <input
                 className="field"
                 placeholder="e.g. 1-5,8,10-"
@@ -143,31 +145,33 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
               />
             </label>
             <Toggle checked={options.no_playlist} onChange={(v) => onChange({ no_playlist: v })}>
-              If the link belongs to a playlist, download only this video
+              {t('If the link belongs to a playlist, download only this video')}
             </Toggle>
             <Toggle checked={options.archive} onChange={(v) => onChange({ archive: v })}>
-              Skip videos that were already downloaded
+              {t('Skip videos that were already downloaded')}
             </Toggle>
           </Section>
 
-          <Section icon={<MonitorCog aria-hidden size={14} />} title="Dynamic pages">
+          <Section icon={<MonitorCog aria-hidden size={14} />} title={t('Dynamic pages')}>
             <Toggle
               checked={options.js_render && playwright}
               disabled={!playwright}
               onChange={(v) => onChange({ js_render: v })}
             >
-              If no video is found, render the page in a headless browser
+              {t('If no video is found, render the page in a headless browser')}
             </Toggle>
             <p className="text-xs leading-5 text-zinc-400">
               {playwright
-                ? 'Playwright detected. On Windows the built-in Edge is used first, so no extra browser download is needed.'
-                : 'Playwright is not installed. Run “pip install playwright” and restart to enable this.'}
+                ? t(
+                    'Playwright detected. On Windows the built-in Edge is used first, so no extra browser download is needed.',
+                  )
+                : t('Playwright is not installed. Run “pip install playwright” and restart to enable this.')}
             </p>
             <Toggle checked={options.all_sniffed} onChange={(v) => onChange({ all_sniffed: v })}>
-              Download every media address found on a page, not just the first that works
+              {t('Download every media address found on a page, not just the first that works')}
             </Toggle>
             <label className="control">
-              <span>Longest wait for the page to play (seconds)</span>
+              <span>{t('Longest wait for the page to play (seconds)')}</span>
               <input
                 className="field"
                 type="number"

@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { useI18n } from '../../i18n'
 
 interface Props {
   open: boolean
@@ -14,6 +15,7 @@ const FOCUSABLE =
 
 /** An accessible dialog: Esc closes, Tab stays inside, and focus returns to where it came from. */
 export function Modal({ open, title, onClose, children, wide = false }: Props) {
+  const { t } = useI18n()
   const titleId = useId()
   const panel = useRef<HTMLDivElement>(null)
   const close = useRef(onClose)
@@ -73,7 +75,7 @@ export function Modal({ open, title, onClose, children, wide = false }: Props) {
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('Close')}
             className="rounded-lg p-1.5 text-zinc-400 hover:bg-white/6 hover:text-white"
           >
             <X size={18} />

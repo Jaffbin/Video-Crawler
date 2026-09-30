@@ -37,3 +37,16 @@ def test_parse_hanime1_downloads_ignores_links_outside_the_download_table():
     assert grab_sites.parse_hanime1_downloads(
         '<a href="https://cdn.example/video.mp4">ad</a>', "https://hanime1.me/download?v=x"
     ) == []
+
+
+def test_parse_hanime1_downloads_accepts_current_data_url_buttons():
+    document = """
+    <table class="download-table">
+      <tr><td><button data-url="https://cdn.example/video-1080p.mp4"
+        download="Episode 02.mp4">Download 1080p</button></td></tr>
+    </table>
+    """
+    items = grab_sites.parse_hanime1_downloads(document, "https://hanime1.me/download?v=x")
+    assert [(item.url, item.title, item.height) for item in items] == [
+        ("https://cdn.example/video-1080p.mp4", "Episode 02", 1080)
+    ]

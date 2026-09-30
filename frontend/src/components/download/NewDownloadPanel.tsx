@@ -9,6 +9,7 @@ import { Button } from '../ui/Button'
 import { AdvancedSettings } from './AdvancedSettings'
 import { FormatQualityFields } from './FormatQualityFields'
 import { ProbeCard } from './ProbeCard'
+import { useI18n } from '../../i18n'
 
 interface Props {
   /** Download settings, owned by App so the subscription form always sees the same values. */
@@ -43,6 +44,7 @@ const Toggle = ({
 )
 
 export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, onToast, onAdded }: Props) {
+  const { t } = useI18n()
   const [urls, setUrls] = useState('')
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null)
   const [busy, setBusy] = useState<'probe' | 'add' | null>(null)
@@ -52,14 +54,14 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
 
   const addUrls = useCallback(
     (found: string[], source: string) => {
-      if (!found.length) return onToast('No links found in that', true)
+      if (!found.length) return onToast(t('No links found in that'), true)
       const { text, added } = mergeUrls(urlsRef.current, found)
-      if (!added) return onToast('Those links are already in the box')
+      if (!added) return onToast(t('Those links are already in the box'))
       setUrls(text)
       setProbeResult(null)
-      onToast(`Added ${added} link${added === 1 ? '' : 's'} (${source})`)
+      onToast(t('Added {count} links ({source})', { count: added, source }))
     },
-    [onToast],
+    [onToast, t],
   )
 
   const { dragging } = useUrlImport({ onUrls: addUrls, onProblem: (m) => onToast(m, true) })
@@ -71,9 +73,9 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
 
   async function readClipboard() {
     try {
-      addUrls(extractUrls(await navigator.clipboard.readText()), 'from the clipboard')
+      addUrls(extractUrls(await navigator.clipboard.readText()), t('from the clipboard'))
     } catch {
-      onToast('The browser did not allow reading the clipboard. Press Ctrl+V instead.', true)
+      onToast(t('The browser did not allow reading the clipboard. Press Ctrl+V instead.'), true)
     }
   }
 
@@ -82,36 +84,36 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
     const found: string[] = []
     for (const file of [...files].slice(0, 20)) {
       if (!looksLikeTextFile(file) || file.size > 2_000_000)
-        onToast(`${file.name} was skipped (not a small text file)`, true)
+        onToast(t('{name} was skipped (not a small text file)', { name: file.name }), true)
       else found.push(...extractUrls(await file.text()))
     }
-    if (files.length) addUrls([...new Set(found)], 'from files')
+    if (files.length) addUrls([...new Set(found)], t('from files'))
   }
 
   async function analyze() {
-    if (!links.length) return onToast('Paste at least one link first', true)
+    if (!links.length) return onToast(t('Paste at least one link first'), true)
     setBusy('probe')
     setProbeResult(null)
     try {
       setProbeResult(await probe(links[0], options))
     } catch (e) {
-      setProbeResult({ error: e instanceof Error ? e.message : 'Could not analyze the link' })
+      setProbeResult({ error: e instanceof Error ? e.message : t('Could not analyze the link') })
     } finally {
       setBusy(null)
     }
   }
 
   async function start() {
-    if (!links.length) return onToast('Paste at least one link first', true)
+    if (!links.length) return onToast(t('Paste at least one link first'), true)
     setBusy('add')
     try {
       const { ids } = await createJobs(links, options)
       setUrls('')
       setProbeResult(null)
-      onToast(`Added ${ids.length} download${ids.length === 1 ? '' : 's'} to the queue`)
+      onToast(t('Added {count} downloads to the queue', { count: ids.length }))
       onAdded()
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'Could not add the downloads', true)
+      onToast(e instanceof Error ? e.message : t('Could not add the downloads'), true)
     } finally {
       setBusy(null)
     }
@@ -121,29 +123,27 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
     <section className="card grid content-start gap-4" aria-labelledby="new-download">
       {dragging && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-emerald-950/85 text-xl font-semibold text-white">
-          Drop to add the links inside
+          {t('Drop to add the links inside')}
         </div>
       )}
 
       <div className="flex items-center justify-between">
         <div>
-          <div className="eyebrow">New download</div>
+          <div className="eyebrow">{t('New download')}</div>
           <h2 id="new-download" className="mt-1 text-lg font-semibold">
-            Paste links to download
+            {t('Paste links to download')}
           </h2>
         </div>
         <span className="text-xs text-zinc-400">
-          {links.length ? `${links.length} link${links.length === 1 ? '' : 's'}` : ''}
+          {links.length ? t('{count} links', { count: links.length }) : ''}
         </span>
       </div>
 
       <div className="grid gap-2">
         <textarea
           className="field min-h-32 resize-y font-mono text-sm leading-6"
-          aria-label="Links to download, one per line"
-          placeholder={
-            'One link per line. Video pages, playlists, mp4 or m3u8 links.\nYou can also press Ctrl+V anywhere, or drop a text file here.'
-          }
+          aria-label={t('Links to download, one per line')}
+          placeholder={`${t('One link per line. Video pages, playlists, mp4 or m3u8 links.')}\n${t('You can also press Ctrl+V anywhere, or drop a text file here.')}`}
           spellCheck={false}
           value={urls}
           onChange={(e) => {
@@ -153,21 +153,21 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
         />
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" className="!px-2.5 !py-1.5 text-xs" onClick={readClipboard}>
-            <ClipboardPaste aria-hidden size={14} /> Read clipboard
+            <ClipboardPaste aria-hidden size={14} /> {t('Read clipboard')}
           </Button>
           <Button
             variant="ghost"
             className="!px-2.5 !py-1.5 text-xs"
             onClick={() => fileInput.current?.click()}
           >
-            <FileUp aria-hidden size={14} /> Import from file
+            <FileUp aria-hidden size={14} /> {t('Import from file')}
           </Button>
           <input
             ref={fileInput}
             type="file"
             hidden
             multiple
-            aria-label="Text files with links"
+            aria-label={t('Text files with links')}
             accept=".txt,.csv,.md,.list,.url,.webloc,.json,.html,.htm,text/*"
             onChange={(e) => {
               void importFiles(e.target.files)
@@ -184,7 +184,7 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
           onPickQuality={(quality) => {
             if (options.mode !== 'mp4') {
               patch({ mode: 'mp4', quality })
-              onToast('Switched to MP4 to use video quality')
+              onToast(t('Switched to MP4 to use video quality'))
               return
             }
 
@@ -205,12 +205,12 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
         {!mp3 && (
           <>
             <Toggle checked={options.subs} onChange={(v) => patch({ subs: v })}>
-              Download subtitles
+              {t('Download subtitles')}
             </Toggle>
             {options.subs && (
               <div className="ml-3 grid gap-2 border-l border-white/10 pl-3">
                 <label className="control">
-                  <span>Subtitle languages (comma separated, “all” for every language)</span>
+                  <span>{t('Subtitle languages (comma separated, “all” for every language)')}</span>
                   <input
                     className="field"
                     value={options.sub_langs}
@@ -219,22 +219,22 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
                   />
                 </label>
                 <Toggle checked={options.auto_subs} onChange={(v) => patch({ auto_subs: v })}>
-                  Use auto-generated subtitles when there are no manual ones
+                  {t('Use auto-generated subtitles when there are no manual ones')}
                 </Toggle>
                 <Toggle checked={options.embed_subs} onChange={(v) => patch({ embed_subs: v })}>
-                  Embed into the MP4 (the .srt file is kept too)
+                  {t('Embed into the MP4 (the .srt file is kept too)')}
                 </Toggle>
               </div>
             )}
           </>
         )}
         <Toggle checked={options.cover} onChange={(v) => patch({ cover: v })}>
-          Download the cover and embed it in the file
+          {t('Download the cover and embed it in the file')}
         </Toggle>
         {options.cover && (
           <div className="ml-3 border-l border-white/10 pl-3">
             <Toggle checked={options.keep_cover} onChange={(v) => patch({ keep_cover: v })}>
-              Also keep a separate .jpg cover
+              {t('Also keep a separate .jpg cover')}
             </Toggle>
           </div>
         )}
@@ -249,7 +249,7 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
           ) : (
             <Search aria-hidden size={16} />
           )}
-          Analyze link
+          {t('Analyze link')}
         </Button>
         <Button variant="primary" onClick={start} disabled={busy !== null || !links.length}>
           {busy === 'add' ? (
@@ -257,7 +257,7 @@ export function NewDownloadPanel({ options, onOptionsChange: patch, playwright, 
           ) : (
             <Download aria-hidden size={16} />
           )}
-          Start download
+          {t('Start download')}
         </Button>
       </div>
     </section>

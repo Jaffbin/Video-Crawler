@@ -1,7 +1,17 @@
-import { Download, FolderOpen, Library, ListVideo, RefreshCw, Stethoscope, TimerReset } from 'lucide-react'
+import {
+  CircleHelp,
+  Download,
+  FolderOpen,
+  Library,
+  ListVideo,
+  RefreshCw,
+  Stethoscope,
+  TimerReset,
+} from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { AppView } from '../../hooks/useNavigation'
 import { cn } from '../../lib/utils'
+import { LOCALES, useI18n } from '../../i18n'
 
 interface Props {
   view: AppView
@@ -14,6 +24,7 @@ interface Props {
   environmentAttention: boolean
   onNavigate: (view: AppView) => void
   onDoctor: () => void
+  onSetup: () => void
   onUpdate: () => void
   onOpenFolder: () => void
 }
@@ -71,6 +82,7 @@ function ToolButton({
   attention?: boolean
   onClick: () => void
 }) {
+  const { t } = useI18n()
   return (
     <button
       type="button"
@@ -79,24 +91,27 @@ function ToolButton({
     >
       <Icon size={17} aria-hidden />
       <span>{label}</span>
-      {attention && <i aria-label="Needs attention" className="ml-auto size-2 rounded-full bg-amber-400" />}
+      {attention && (
+        <i aria-label={t('Needs attention')} className="ml-auto size-2 rounded-full bg-amber-400" />
+      )}
     </button>
   )
 }
 
 export function Sidebar(p: Props) {
+  const { locale, setLocale, t } = useI18n()
   const items: NavItem[] = [
-    { id: 'new', label: 'New download', shortLabel: 'New', icon: Download },
+    { id: 'new', label: t('New download'), shortLabel: t('New'), icon: Download },
     {
       id: 'queue',
-      label: 'Queue',
-      shortLabel: 'Queue',
+      label: t('Queue'),
+      shortLabel: t('Queue'),
       icon: ListVideo,
       count: p.failedJobs || p.activeJobs,
       bad: p.failedJobs > 0,
     },
-    { id: 'auto-download', label: 'Auto-download', shortLabel: 'Auto', icon: TimerReset },
-    { id: 'library', label: 'Library', shortLabel: 'Library', icon: Library, count: p.fileCount },
+    { id: 'auto-download', label: t('Auto-download'), shortLabel: t('Auto'), icon: TimerReset },
+    { id: 'library', label: t('Library'), shortLabel: t('Library'), icon: Library, count: p.fileCount },
   ]
 
   return (
@@ -116,12 +131,12 @@ export function Sidebar(p: Props) {
                 aria-hidden
                 className={cn('size-1.5 rounded-full', p.online ? 'bg-emerald-400' : 'bg-red-400')}
               />
-              {p.online ? `yt-dlp ${p.version}` : 'Reconnecting…'}
+              {p.online ? `yt-dlp ${p.version}` : t('Reconnecting')}
             </div>
           </div>
         </div>
 
-        <nav aria-label="Main navigation" className="grid gap-1">
+        <nav aria-label={t('Main navigation')} className="grid gap-1">
           {items.map((item) => (
             <NavButton
               key={item.id}
@@ -133,19 +148,39 @@ export function Sidebar(p: Props) {
         </nav>
 
         <div className="mt-auto grid gap-1 border-t border-white/[.06] pt-3">
+          <ToolButton icon={CircleHelp} label={t('Getting started')} onClick={p.onSetup} />
+          <label className="grid gap-1 px-3 pb-2 text-xs text-zinc-500">
+            <span>{t('Language')}</span>
+            <select
+              className="field !py-1.5"
+              value={locale}
+              onChange={(e) => setLocale(e.target.value as typeof locale)}
+            >
+              {LOCALES.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <ToolButton
             icon={Stethoscope}
-            label="Diagnostics"
+            label={t('Diagnostics')}
             attention={p.environmentAttention}
             onClick={p.onDoctor}
           />
-          <ToolButton icon={RefreshCw} label="Updates" attention={p.updateAttention} onClick={p.onUpdate} />
-          <ToolButton icon={FolderOpen} label="Open folder" onClick={p.onOpenFolder} />
+          <ToolButton
+            icon={RefreshCw}
+            label={t('Updates')}
+            attention={p.updateAttention}
+            onClick={p.onUpdate}
+          />
+          <ToolButton icon={FolderOpen} label={t('Open folder')} onClick={p.onOpenFolder} />
         </div>
       </aside>
 
       <nav
-        aria-label="Main navigation"
+        aria-label={t('Main navigation')}
         className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-white/[.08] bg-[#0b0d10]/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden"
       >
         {items.map((item) => {

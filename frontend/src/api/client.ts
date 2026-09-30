@@ -1,6 +1,8 @@
 import type {
   BackfillMode,
+  SubscriptionFilters,
   Subscription,
+  SubscriptionPreview,
   SubscriptionsResponse,
   ComponentExtras,
   CookieStatus,
@@ -93,16 +95,18 @@ export const addSubscription = (
   options: DownloadOptions,
   backfill: BackfillMode,
   backfillCount: number,
+  filters: SubscriptionFilters,
 ) =>
   post<Subscription>('/api/subscriptions', {
     url,
     options: sanitizeOptions(options),
     backfill,
     backfill_count: backfillCount,
+    filters,
   })
 export const updateSubscription = (
   id: string,
-  patch: Partial<Pick<Subscription, 'enabled' | 'backfill' | 'backfill_count'>> & {
+  patch: Partial<Pick<Subscription, 'enabled' | 'backfill' | 'backfill_count' | 'filters'>> & {
     options?: DownloadOptions
   },
 ) =>
@@ -113,4 +117,6 @@ export const updateSubscription = (
   })
 export const checkSubscriptionNow = (id: string) =>
   post<{ ok: boolean }>(`/api/subscriptions/${id}/check-now`)
+export const previewSubscription = (id: string, filters: SubscriptionFilters) =>
+  post<SubscriptionPreview>(`/api/subscriptions/${id}/preview`, { filters })
 export const removeSubscription = (id: string) => post<{ ok: boolean }>(`/api/subscriptions/${id}/remove`)

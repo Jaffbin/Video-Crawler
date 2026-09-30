@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchesFilter, matchesSearch } from './QueuePanel'
+import { matchesFilter, matchesSearch, successStats } from './QueuePanel'
 import type { Job } from '../../types/api'
 
 const job = (over: Partial<Job>): Job => ({
@@ -45,5 +45,22 @@ describe('matchesSearch', () => {
   })
   it('an empty query matches everything', () => {
     expect(matchesSearch(job({ title: 'Anything' }), '  ')).toBe(true)
+  })
+})
+
+describe('successStats', () => {
+  it('uses completed and failed jobs but excludes active and canceled jobs', () => {
+    expect(
+      successStats([
+        job({ status: 'done' }),
+        job({ status: 'done' }),
+        job({ status: 'error' }),
+        job({ status: 'canceled' }),
+        job({ status: 'running' }),
+      ]),
+    ).toEqual({ succeeded: 2, measured: 3, rate: 67 })
+  })
+  it('does not show a rate before an attempt finishes', () => {
+    expect(successStats([job({ status: 'queued' })]).rate).toBeNull()
   })
 })

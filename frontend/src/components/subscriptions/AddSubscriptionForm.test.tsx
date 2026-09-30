@@ -79,6 +79,21 @@ describe('AddSubscriptionForm', () => {
     expect(screen.getByLabelText(/how many/i)).toBeInTheDocument()
   })
 
+  it('submits per-subscription keyword and media filters', async () => {
+    render(<AddSubscriptionForm options={DEFAULT_OPTIONS} onAdded={() => {}} onToast={() => {}} />)
+    await userEvent.type(screen.getByPlaceholderText(/channel or playlist link/i), 'https://example.com/c')
+    await userEvent.type(screen.getByLabelText(/title must contain/i), 'cats, dogs')
+    await userEvent.type(screen.getByLabelText(/minimum duration/i), '2')
+    await userEvent.click(screen.getByLabelText(/exclude live/i))
+    await userEvent.click(screen.getByRole('button', { name: /^add$/i }))
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0].body.filters).toMatchObject({
+      include_keywords: ['cats', 'dogs'],
+      exclude_live: true,
+      min_duration: 120,
+    })
+  })
+
   it('does not submit twice while the first check is still running', async () => {
     let finishRequest!: (response: Response) => void
     vi.stubGlobal(

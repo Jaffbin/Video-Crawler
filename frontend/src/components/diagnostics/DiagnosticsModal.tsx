@@ -5,6 +5,7 @@ import type { ComponentExtras, DoctorResult } from '../../types/api'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { DoctorList } from './DoctorList'
+import { useI18n } from '../../i18n'
 
 interface Props {
   open: boolean
@@ -34,6 +35,7 @@ export function DiagnosticsModal({
   installBusy,
   onToast,
 }: Props) {
+  const { t } = useI18n()
   const [loading, setLoading] = useState(false)
   const [netResult, setNetResult] = useState<DoctorResult | null>(null)
 
@@ -52,7 +54,7 @@ export function DiagnosticsModal({
     try {
       setNetResult(await getDoctor(true, true))
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'Network test failed', true)
+      onToast(e instanceof Error ? e.message : t('Network test failed'), true)
     } finally {
       setLoading(false)
     }
@@ -62,43 +64,46 @@ export function DiagnosticsModal({
   const report = netResult?.report ?? doctor?.report ?? ''
 
   return (
-    <Modal open={open} onClose={onClose} title="Diagnostics" wide>
+    <Modal open={open} onClose={onClose} title={t('Diagnostics')} wide>
       <div className="grid gap-4">
         <div className="flex flex-wrap gap-2">
           <Button onClick={recheck} disabled={loading}>
-            Re-check
+            {t('Re-check')}
           </Button>
           <Button onClick={testNetwork} disabled={loading}>
-            Test network
+            {t('Test network')}
           </Button>
           <Button
             variant="ghost"
             disabled={!report}
             onClick={async () =>
               onToast(
-                (await copyText(report)) ? 'Report copied. Read it before you share it.' : 'Could not copy',
+                (await copyText(report))
+                  ? t('Report copied. Read it before you share it.')
+                  : t('Could not copy'),
                 !report,
               )
             }
           >
-            Copy report
+            {t('Copy report')}
           </Button>
         </div>
 
         {checks.length === 0 ? (
-          <p className="text-sm text-zinc-400">Checking…</p>
+          <p className="text-sm text-zinc-400">{t('Checking…')}</p>
         ) : (
           <DoctorList
             checks={checks}
-            onCopy={async (fix) => onToast((await copyText(fix)) ? 'Copied' : 'Could not copy')}
+            onCopy={async (fix) => onToast((await copyText(fix)) ? t('Copied') : t('Could not copy'))}
             onFix={(c) => void onInstall(c.action === 'install_components' ? 'default,deno' : 'default')}
             busyAction={installBusy ? 'installing' : null}
           />
         )}
 
         <p className="text-xs text-zinc-500">
-          The report hides your home folder and proxy passwords, but it includes your most recent failed links
-          and log lines. Read it before you share it.
+          {t(
+            'The report hides your home folder and proxy passwords, but includes recent failed links and log lines. Read it before sharing.',
+          )}
         </p>
       </div>
     </Modal>

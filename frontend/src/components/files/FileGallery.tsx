@@ -5,6 +5,7 @@ import type { ToastFn } from '../../hooks/useToasts'
 import { formatBytes, formatDate } from '../../lib/utils'
 import type { FileItem } from '../../types/api'
 import { Button } from '../ui/Button'
+import { useI18n } from '../../i18n'
 
 const AUDIO = new Set(['.mp3', '.m4a', '.aac', '.flac', '.ogg', '.opus'])
 
@@ -16,30 +17,31 @@ interface Props {
 }
 
 export function FileGallery({ files, windowMode, onRefresh, onToast }: Props) {
+  const { t } = useI18n()
   const [query, setQuery] = useState('')
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
     return q ? files.filter((f) => f.path.toLowerCase().includes(q)) : files
   }, [files, query])
-  const report = (e: unknown) => onToast(e instanceof Error ? e.message : 'Could not open it', true)
+  const report = (e: unknown) => onToast(e instanceof Error ? e.message : t('Could not open it'), true)
   const isAudio = (name: string) => AUDIO.has(name.slice(name.lastIndexOf('.')).toLowerCase())
 
   return (
     <section className="card grid content-start gap-4" aria-labelledby="files-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="eyebrow">Library</div>
+          <div className="eyebrow">{t('Library')}</div>
           <h2 id="files-title" className="mt-1 text-lg font-semibold">
-            Downloaded files
+            {t('Downloaded files')}
           </h2>
         </div>
         <Button variant="ghost" onClick={onRefresh}>
-          <RefreshCw aria-hidden size={15} /> Refresh
+          <RefreshCw aria-hidden size={15} /> {t('Refresh')}
         </Button>
       </div>
 
       <label className="relative">
-        <span className="sr-only">Search files</span>
+        <span className="sr-only">{t('Search files')}</span>
         <Search
           aria-hidden
           size={15}
@@ -48,7 +50,7 @@ export function FileGallery({ files, windowMode, onRefresh, onToast }: Props) {
         <input
           className="field !pl-9"
           type="search"
-          placeholder="Search files"
+          placeholder={t('Search files')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -56,11 +58,11 @@ export function FileGallery({ files, windowMode, onRefresh, onToast }: Props) {
 
       {files.length === 0 ? (
         <p className="rounded-xl bg-white/[.025] px-4 py-8 text-center text-sm text-zinc-400">
-          No completed files yet.
+          {t('No completed files yet.')}
         </p>
       ) : shown.length === 0 ? (
         <p className="rounded-xl bg-white/[.025] px-4 py-8 text-center text-sm text-zinc-400">
-          No files match your search.
+          {t('No files match your search.')}
         </p>
       ) : (
         <ul className="grid gap-1">
@@ -81,22 +83,22 @@ export function FileGallery({ files, windowMode, onRefresh, onToast }: Props) {
               <span className="hidden shrink-0 text-xs text-zinc-500 md:inline">{formatDate(f.mtime)}</span>
               {windowMode ? (
                 <button type="button" className="action-btn" onClick={() => openFile(f.path).catch(report)}>
-                  <Play aria-hidden size={13} /> Open
+                  <Play aria-hidden size={13} /> {t('Open')}
                 </button>
               ) : (
                 <a className="action-btn" href={fileUrl(f.path)} target="_blank" rel="noreferrer">
-                  <Play aria-hidden size={13} /> Play
+                  <Play aria-hidden size={13} /> {t('Play')}
                 </a>
               )}
               <a className="action-btn" href={fileUrl(f.path)} download={f.name}>
-                Download
+                {t('Download')}
               </a>
 
               <button
                 type="button"
                 className="action-btn"
                 onClick={() => openFolder(f.path).catch(report)}
-                aria-label={`Show ${f.name} in folder`}
+                aria-label={t('Show {name} in folder', { name: f.name })}
               >
                 <FolderOpen aria-hidden size={13} />
               </button>

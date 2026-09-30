@@ -13,12 +13,24 @@ const sub = (over: Partial<Subscription> = {}): Subscription => ({
   enabled: true,
   backfill: 'none',
   backfill_count: 5,
+  filters: {
+    include_keywords: [],
+    exclude_keywords: [],
+    exclude_live: false,
+    exclude_shorts: false,
+    min_duration: 0,
+    max_duration: 0,
+  },
   mode: 'mp4',
   options: { ...DEFAULT_OPTIONS, quality: '1080' },
   created: 1,
   last_checked: 0,
   last_error: '',
   total_queued: 0,
+  total_filtered: 0,
+  last_found: 0,
+  last_queued: 0,
+  last_filtered: 0,
   next_check: null,
   checking: false,
   ...over,
@@ -120,5 +132,47 @@ describe('SubscriptionCard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(requests).toHaveLength(0)
     expect(screen.getByRole('button', { name: /edit format/i })).toBeInTheDocument()
+  })
+
+  it('previews draft filters without updating the subscription', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({ url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined })
+        return new Response(
+          JSON.stringify({
+            title: 'Channel',
+            total_candidates: 1,
+            would_queue: 0,
+            filtered: 1,
+            items: [
+              {
+                id: 'a',
+                title: 'Dog video',
+                url: 'https://example.com/a',
+                duration: 90,
+                reason: 'include_keywords',
+                eligible: true,
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }),
+    )
+    render(
+      <ul>
+        <SubscriptionCard sub={sub()} onChanged={() => {}} onToast={() => {}} />
+      </ul>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: /edit format/i }))
+    await userEvent.type(screen.getByLabelText(/title must contain/i), 'cat')
+    await userEvent.click(screen.getByRole('button', { name: /preview filters/i }))
+    await waitFor(() => expect(screen.getByText('Dog video')).toBeInTheDocument())
+    expect(screen.getByText(/Would queue: 0/)).toBeInTheDocument()
+    expect(screen.getByText(/Filtered: 1/)).toBeInTheDocument()
+    expect(requests).toHaveLength(1)
+    expect(requests[0].url).toBe('/api/subscriptions/abcd1234/preview')
+    expect(requests[0].body.filters.include_keywords).toEqual(['cat'])
   })
 })

@@ -11,6 +11,49 @@ from pathlib import Path
 
 
 BACKFILL_MAX = 50
+FILTER_DURATION_MAX = 7 * 24 * 60 * 60
+
+
+def normalize_subscription_filters(value) -> dict:
+    """Return a bounded, JSON-safe subscription filter object.
+
+    Older subscription files have no ``filters`` field, so an empty object must
+    continue to mean "download everything".
+    """
+    value = value if isinstance(value, dict) else {}
+
+    def keywords(name: str) -> list[str]:
+        raw = value.get(name, [])
+        if isinstance(raw, str):
+            raw = re.split(r"[,\n]", raw)
+        if not isinstance(raw, list):
+            return []
+        result = []
+        for item in raw:
+            word = str(item).strip()[:80]
+            if word and word.casefold() not in {entry.casefold() for entry in result}:
+                result.append(word)
+            if len(result) == 20:
+                break
+        return result
+
+    def duration(name: str) -> int:
+        try:
+            return max(0, min(int(value.get(name) or 0), FILTER_DURATION_MAX))
+        except (TypeError, ValueError):
+            return 0
+
+    minimum, maximum = duration("min_duration"), duration("max_duration")
+    if minimum and maximum and minimum > maximum:
+        minimum, maximum = maximum, minimum
+    return {
+        "include_keywords": keywords("include_keywords"),
+        "exclude_keywords": keywords("exclude_keywords"),
+        "exclude_live": value.get("exclude_live") is True,
+        "exclude_shorts": value.get("exclude_shorts") is True,
+        "min_duration": minimum,
+        "max_duration": maximum,
+    }
 
 
 def http_url(value, schemes=("http", "https")) -> str | None:
@@ -31,6 +74,8 @@ class Job:
         self.eta = ""
         self.item = ""
         self.error = ""
+        self.error_kind = ""
+        self.error_hint = ""
         self.files: list[str] = []
         self.seen_paths: list[str] = []
         self.log: collections.deque[str] = collections.deque(maxlen=400)
@@ -55,7 +100,8 @@ class Job:
         return {
             "id": self.id, "url": self.url, "options": self.options, "status": self.status,
             "stage": self.stage, "title": self.title, "percent": self.percent, "item": self.item,
-            "error": self.error, "files": files, "created": self.created, "finished": self.finished,
+            "error": self.error, "error_kind": self.error_kind, "error_hint": self.error_hint,
+            "files": files, "created": self.created, "finished": self.finished,
             "log": [line[:300] for line in keep_log], "notes": self.notes[:3], "source": self.source,
         }
 
@@ -79,6 +125,8 @@ class Job:
             "This task was incomplete when the program exited, you can click 'Retry'."
             if interrupted else str(data.get("error") or "")[:600]
         )
+        job.error_kind = str(data.get("error_kind") or "")[:40]
+        job.error_hint = str(data.get("error_hint") or "")[:400]
         try:
             job.percent = 100.0 if job.status == "done" else float(data.get("percent") or 0)
             job.created = float(data.get("created") or time.time())
@@ -115,14 +163,15 @@ class Job:
         return {
             "id": self.id, "url": self.url, "status": self.status, "stage": self.stage,
             "title": self.title, "percent": round(self.percent, 1), "speed": self.speed,
-            "eta": self.eta, "item": self.item, "error": self.error, "files": files,
+            "eta": self.eta, "item": self.item, "error": self.error,
+            "error_kind": self.error_kind, "error_hint": self.error_hint, "files": files,
             "mode": self.options.get("mode", "mp4"), "created": self.created,
             "finished": self.finished, "notes": list(self.notes), "source": self.source,
         }
 
 
 class Subscription:
-    def __init__(self, url: str, options: dict, backfill: str = "none", backfill_count: int = 5):
+    def __init__(self, url: str, options: dict, backfill: str = "none", backfill_count: int = 5, filters=None):
         self.id = uuid.uuid4().hex[:8]
         self.url = url
         self.title = ""
@@ -134,20 +183,31 @@ class Subscription:
         except (TypeError, ValueError):
             count = 5
         self.backfill_count = max(1, min(count, BACKFILL_MAX))
+        self.filters = normalize_subscription_filters(filters)
         self.seen_ids: set[str] = set()
         self.initialized = False
         self.created = time.time()
         self.last_checked = 0.0
         self.last_error = ""
+        self.last_error_kind = ""
         self.total_queued = 0
+        self.total_filtered = 0
+        self.last_found = 0
+        self.last_queued = 0
+        self.last_filtered = 0
         self.removed = False
 
     def to_dict(self) -> dict:
         return {
             "id": self.id, "url": self.url, "title": self.title, "options": self.options,
             "enabled": self.enabled, "backfill": self.backfill, "backfill_count": self.backfill_count,
+            "filters": self.filters,
             "seen_ids": sorted(self.seen_ids), "initialized": self.initialized, "created": self.created,
-            "last_checked": self.last_checked, "last_error": self.last_error, "total_queued": self.total_queued,
+            "last_checked": self.last_checked, "last_error": self.last_error,
+            "last_error_kind": self.last_error_kind, "total_queued": self.total_queued,
+            "total_filtered": self.total_filtered,
+            "last_found": self.last_found, "last_queued": self.last_queued,
+            "last_filtered": self.last_filtered,
         }
 
     @classmethod
@@ -156,7 +216,9 @@ class Subscription:
         if not url or not re.fullmatch(r"[0-9a-f]{8}", subscription_id):
             return None
         options = data.get("options") if isinstance(data.get("options"), dict) else {}
-        subscription = cls(url, options, str(data.get("backfill") or "none"), data.get("backfill_count"))
+        subscription = cls(
+            url, options, str(data.get("backfill") or "none"), data.get("backfill_count"), data.get("filters")
+        )
         subscription.id = subscription_id
         subscription.title = str(data.get("title") or "")[:300]
         subscription.enabled = bool(data.get("enabled", True))
@@ -164,10 +226,15 @@ class Subscription:
         subscription.seen_ids = {str(item) for item in seen_ids if item} if isinstance(seen_ids, list) else set()
         subscription.initialized = bool(data.get("initialized"))
         subscription.last_error = str(data.get("last_error") or "")[:600]
+        subscription.last_error_kind = str(data.get("last_error_kind") or "")[:40]
         try:
             subscription.created = float(data.get("created") or time.time())
             subscription.last_checked = float(data.get("last_checked") or 0)
             subscription.total_queued = int(data.get("total_queued") or 0)
+            subscription.total_filtered = int(data.get("total_filtered") or 0)
+            subscription.last_found = int(data.get("last_found") or 0)
+            subscription.last_queued = int(data.get("last_queued") or 0)
+            subscription.last_filtered = int(data.get("last_filtered") or 0)
         except (TypeError, ValueError):
             pass
         return subscription
@@ -175,10 +242,13 @@ class Subscription:
     def view(self, interval_seconds: int, checking: bool) -> dict:
         return {
             "id": self.id, "url": self.url, "title": self.title, "enabled": self.enabled,
-            "backfill": self.backfill, "backfill_count": self.backfill_count,
+            "backfill": self.backfill, "backfill_count": self.backfill_count, "filters": self.filters,
             "mode": self.options.get("mode", "mp4"), "options": self.options,
             "created": self.created, "last_checked": self.last_checked, "last_error": self.last_error,
-            "total_queued": self.total_queued,
+            "last_error_kind": self.last_error_kind,
+            "total_queued": self.total_queued, "total_filtered": self.total_filtered,
+            "last_found": self.last_found, "last_queued": self.last_queued,
+            "last_filtered": self.last_filtered,
             "next_check": (self.last_checked + interval_seconds) if self.enabled else None,
             "checking": checking,
         }

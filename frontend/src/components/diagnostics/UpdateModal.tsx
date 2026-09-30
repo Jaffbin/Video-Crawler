@@ -4,6 +4,7 @@ import type { ToastFn } from '../../hooks/useToasts'
 import type { ComponentExtras, YtdlpCheck } from '../../types/api'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
+import { useI18n } from '../../i18n'
 
 interface Props {
   open: boolean
@@ -17,6 +18,7 @@ interface Props {
 type Phase = 'idle' | 'checking' | 'installing' | 'needs-restart' | 'done' | 'error'
 
 export function UpdateModal({ open, onClose, onRestart, onToast, onChecked }: Props) {
+  const { t } = useI18n()
   const [check, setCheck] = useState<YtdlpCheck | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [log, setLog] = useState<string[]>([])
@@ -37,7 +39,7 @@ export function UpdateModal({ open, onClose, onRestart, onToast, onChecked }: Pr
       onChecked(c)
       setPhase(c.needs_restart ? 'needs-restart' : 'idle')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not check for updates')
+      setError(e instanceof Error ? e.message : t('Could not check for updates'))
       setPhase('error')
     }
   }
@@ -50,7 +52,7 @@ export function UpdateModal({ open, onClose, onRestart, onToast, onChecked }: Pr
       await startYtdlpUpdate(extras)
     } catch (e) {
       setPhase('error')
-      setError(e instanceof Error ? e.message : 'Could not start the update')
+      setError(e instanceof Error ? e.message : t('Could not start the update'))
       return
     }
     poll()
@@ -73,7 +75,7 @@ export function UpdateModal({ open, onClose, onRestart, onToast, onChecked }: Pr
       }
       if (status.status === 'error') {
         setPhase('error')
-        setError(status.error || 'Update failed')
+        setError(status.error || t('Update failed'))
         return
       }
       if (status.extras.includes('deno')) {
@@ -85,30 +87,35 @@ export function UpdateModal({ open, onClose, onRestart, onToast, onChecked }: Pr
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="yt-dlp updates">
+    <Modal open={open} onClose={onClose} title={t('yt-dlp updates')}>
       <div className="grid gap-4 text-sm">
-        {phase === 'checking' && <p className="text-zinc-400">Checking…</p>}
+        {phase === 'checking' && <p className="text-zinc-400">{t('Checking…')}</p>}
 
         {check && phase !== 'checking' && phase !== 'installing' && (
           <div className="rounded-xl bg-white/[.03] p-3">
             <p>
-              Running <span className="font-mono">{check.running}</span>
+              {t('Running')} <span className="font-mono">{check.running}</span>
               {check.installed !== check.running && (
                 <>
                   {' '}
-                  (installed <span className="font-mono">{check.installed}</span>, restart to use it)
+                  ({t('Installed')} <span className="font-mono">{check.installed}</span>,{' '}
+                  {t('restart to use it')})
                 </>
               )}
             </p>
-            {check.latest && <p className="mt-1 text-zinc-400">Latest on PyPI: {check.latest}</p>}
+            {check.latest && (
+              <p className="mt-1 text-zinc-400">
+                {t('Latest on PyPI')}: {check.latest}
+              </p>
+            )}
           </div>
         )}
 
         {phase === 'needs-restart' && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-emerald-500/[.08] p-3 text-emerald-200">
-            <span>Update installed. Restart the service to use it.</span>
+            <span>{t('Update installed. Restart the service to use it.')}</span>
             <Button variant="primary" onClick={onRestart}>
-              Restart service
+              {t('Restart service')}
             </Button>
           </div>
         )}
@@ -121,20 +128,20 @@ export function UpdateModal({ open, onClose, onRestart, onToast, onChecked }: Pr
 
         {(phase === 'installing' || log.length > 0) && (
           <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-black/40 p-3 font-mono text-xs text-zinc-300">
-            {log.join('\n') || 'Starting…'}
+            {log.join('\n') || t('Starting…')}
           </pre>
         )}
 
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => refresh(true)} disabled={phase === 'checking' || phase === 'installing'}>
-            Check again
+            {t('Check again')}
           </Button>
           <Button
             variant="primary"
             disabled={phase === 'installing' || phase === 'checking'}
             onClick={() => void install(check?.newer ? 'default' : 'default,deno')}
           >
-            {check?.newer ? 'Update yt-dlp' : 'Install YouTube components'}
+            {check?.newer ? t('Update yt-dlp') : t('Install YouTube components')}
           </Button>
           <Button
             variant="ghost"
@@ -142,13 +149,13 @@ export function UpdateModal({ open, onClose, onRestart, onToast, onChecked }: Pr
             onClick={async () => {
               try {
                 await navigator.clipboard.writeText('pip install -U "yt-dlp[default,deno]"')
-                onToast('Command copied')
+                onToast(t('Command copied'))
               } catch {
-                onToast('Could not copy', true)
+                onToast(t('Could not copy'), true)
               }
             }}
           >
-            Copy command
+            {t('Copy command')}
           </Button>
         </div>
       </div>

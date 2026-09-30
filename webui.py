@@ -43,7 +43,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import grab  # noqa: E402
 from grab_config import parse_web_config  # noqa: E402
-from grab_models import BACKFILL_MAX, Job, Subscription, http_url  # noqa: E402
+from grab_models import BACKFILL_MAX, Job, Subscription, http_url, normalize_subscription_filters  # noqa: E402
 from grab_state import JobManager, SubscriptionManager  # noqa: E402
 from grab_storage import JsonStore  # noqa: E402
 import yt_dlp  # noqa: E402
@@ -134,46 +134,68 @@ def fmt_eta(s) -> str:
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
 
 
-def friendly_error(msg: str) -> str:
+def error_details(msg: str) -> dict[str, str]:
+    """Classify a downloader failure without discarding its actionable cause."""
     m = re.sub(r"^ERROR:\s*", "", strip_ansi(msg or "").strip())
     # yt-dlp appends "; please report this issue ... Confirm you are on the latest version" to unexpected errors.
     # That boilerplate must not be mistaken for the real cause ("confirm you" once triggered the login message).
     m = re.split(r";\s*please report this issue", m, maxsplit=1)[0].strip()
     low = m.lower()
     if "unsupported url" in low:
-        return ("Cannot recognize this page, and no media URLs found in page source. The video might be loaded via JavaScript: "
-                "you can enable page rendering in 'Advanced Settings', or open Network in browser F12, find the m3u8 / mp4 URL and paste it.")
+        return {"kind": "unsupported", "message": "Cannot recognize this page or find a media URL.",
+                "hint": "Enable page rendering in Advanced Settings. If that still fails, paste the m3u8 or mp4 URL from the browser Network panel."}
     if any(k in low for k in ("javascript runtime", "challenge solving failed", "signature solving failed")):
-        return "YouTube needs a JavaScript runtime (Deno) and the yt-dlp-ejs component. Open Diagnostics and click 'Install now'."
+        return {"kind": "javascript", "message": "The site challenge could not be solved.",
+                "hint": "Open Diagnostics and install Deno plus the recommended yt-dlp components."}
     if "cookie" in low and any(k in low for k in ("could not copy", "cookie database", "decrypt", "locked")):
-        return ("Could not read the browser's cookies. Close the browser completely and retry, "
-                "or upload a cookies.txt file in 'Advanced Settings'.")
+        return {"kind": "cookies_locked", "message": "Could not read the browser's cookies.",
+                "hint": "Close the browser completely and retry, or upload a cookies.txt file in Advanced Settings."}
     if "cookies are no longer valid" in low or "likely been rotated" in low:
-        return ("Your YouTube cookies were rotated or expired. Export a fresh cookies.txt from a private window "
-                "and upload it again in 'Advanced Settings'.")
+        return {"kind": "cookies_expired", "message": "The saved cookies were rotated or expired.",
+                "hint": "Export a fresh cookies.txt from a private window and upload it in Advanced Settings."}
     if any(k in low for k in ("sign in", "log in", "login", "not a bot", "use --cookies", "cookies-from-browser")):
-        return "This content requires login or verification: upload a cookies.txt file or pick a browser in 'Advanced Settings' and try again."
+        return {"kind": "login", "message": "This content requires login or verification.",
+                "hint": "Upload a cookies.txt file or select a browser in Advanced Settings, then retry."}
     if "ffmpeg" in low or "ffprobe" in low:
-        return "ffmpeg not found, please install and add to PATH, then restart this program."
+        return {"kind": "ffmpeg", "message": "ffmpeg is missing or could not process the media.",
+                "hint": "Open Diagnostics, install ffmpeg, then restart the app."}
     if any(k in low for k in ("getaddrinfo failed", "name or service not known", "nodename nor servname",
                               "temporary failure in name resolution", "no address associated")):
-        return ("Cannot find that site's address. Check the link and your internet connection or proxy. "
-                f"(Details: {m[:140]})")
+        return {"kind": "dns", "message": "Cannot find that site's address.",
+                "hint": "Check the link and DNS settings, then open Diagnostics > Test network."}
     if "certificate" in low and "verify" in low:
-        return ("The site's SSL certificate could not be verified. An antivirus or proxy that inspects HTTPS, "
-                "or a wrong system clock, are the usual causes. (Details: " + m[:140] + ")")
+        return {"kind": "certificate", "message": "The site's SSL certificate could not be verified.",
+                "hint": "Check the system clock and any antivirus, VPN, or proxy that inspects HTTPS."}
     if any(k in low for k in ("timed out", "connection refused", "failed to establish a new connection", "connection reset",
                               "network is unreachable", "proxyerror", "unable to connect to proxy")):
-        return ("Cannot reach the site. Check your network, VPN or proxy (Advanced Settings > Proxy), "
-                f"or open Diagnostics > Test network. (Details: {m[:140]})")
+        return {"kind": "network", "message": "Cannot reach the site.",
+                "hint": "Check the network, VPN, DNS, or proxy, then open Diagnostics > Test network."}
     if "http error 403" in low or "http error 401" in low:
         if importlib.util.find_spec("curl_cffi") is None:
-            return ("Server denied access and browser impersonation support is missing. "
-                    "Open Diagnostics and install the recommended yt-dlp components, then retry.")
-        return "Server denied access. You can fill in Referer in 'Advanced Settings' or use cookies."
+            return {"kind": "impersonation_missing", "message": "The server denied access and browser impersonation is unavailable.",
+                    "hint": "Open Diagnostics, install the recommended components, then retry."}
+        return {"kind": "forbidden", "message": "The server denied access.",
+                "hint": "Add the source page as Referer or provide cookies in Advanced Settings, then retry."}
     if "http error 404" in low:
-        return "Link has expired (404)."
-    return m[:300] or "Download failed, expand log to see the reason."
+        return {"kind": "not_found", "message": "The link was not found or has expired (404).",
+                "hint": "Open the original page and copy a fresh link."}
+    if any(k in low for k in ("no space left", "disk full", "errno 28")):
+        return {"kind": "disk_full", "message": "The download drive is out of free space.",
+                "hint": "Free some space or choose another download folder, then retry."}
+    return {"kind": "unknown", "message": m[:300] or "Download failed.",
+            "hint": "Expand the log for the technical details, update yt-dlp, then retry."}
+
+
+def friendly_error(msg: str) -> str:
+    details = error_details(msg)
+    return f"{details['message']} {details['hint']}".strip()
+
+
+def set_job_error(job: Job, msg: str) -> None:
+    details = error_details(msg)
+    job.error = details["message"]
+    job.error_kind = details["kind"]
+    job.error_hint = details["hint"]
 
 
 def make_args(o: dict):
@@ -336,10 +358,15 @@ def run_job(job: Job) -> None:
     job.files = [p for p in job.seen_paths if Path(p).suffix.lower() in MEDIA_SUFFIX and Path(p).exists()]
     if ok:
         job.status, job.stage, job.percent, job.error = "done", "Done", 100.0, ""
+        job.error_kind = job.error_hint = ""
     else:
         job.status, job.stage = "error", "Failed"
-        job.error = ("Partial items failed to download, expand log for details." if job.files
-                     else friendly_error(job.error))
+        if job.files:
+            job.error = "Some items downloaded, but at least one item failed."
+            job.error_kind = "partial"
+            job.error_hint = "Expand the log to identify the failed item, then retry that link separately."
+        else:
+            set_job_error(job, job.error)
     job.speed = job.eta = ""
 
 
@@ -358,7 +385,8 @@ def worker(stop_event: threading.Event | None = None) -> None:
         except DownloadCancelled:
             job.status, job.stage, job.speed, job.eta = "canceled", "Canceled", "", ""
         except (Exception, SystemExit) as e:  # noqa: BLE001
-            job.status, job.stage, job.error = "error", "Failed", friendly_error(str(e))
+            job.status, job.stage = "error", "Failed"
+            set_job_error(job, str(e))
         finally:
             if job.status in ("done", "error", "canceled"):
                 job.finished = time.time()
@@ -885,10 +913,74 @@ def normalize_flat_entries(info: dict, fallback_url: str) -> list[dict]:
         if not entry_url and not is_playlist:
             entry_url = fallback_url
         if entry_url:
+            try:
+                duration = max(0, int(float(entry.get("duration")))) if entry.get("duration") is not None else None
+            except (TypeError, ValueError):
+                duration = None
+            candidate_urls = " ".join(str(entry.get(key) or "") for key in ("url", "webpage_url", "original_url"))
+            live_status = str(entry.get("live_status") or "").lower()
             normalized.append({
                 "id": str(entry["id"]), "url": entry_url, "title": entry.get("title") or "",
+                "duration": duration,
+                "is_live": bool(entry.get("is_live")) or live_status in {"is_live", "is_upcoming"},
+                "is_short": "/shorts/" in candidate_urls.lower(),
             })
     return normalized
+
+
+def subscription_filter_reason(entry: dict, filters: dict) -> str | None:
+    """Return a stable reason code for a rejected entry, or None when it matches."""
+    included = [word.casefold() for word in filters["include_keywords"]]
+    excluded = [word.casefold() for word in filters["exclude_keywords"]]
+    title = str(entry.get("title") or "").casefold()
+    duration = entry.get("duration")
+    if included and not any(word in title for word in included):
+        return "include_keywords"
+    if any(word in title for word in excluded):
+        return "exclude_keywords"
+    if filters["exclude_live"] and entry.get("is_live"):
+        return "live"
+    if filters["exclude_shorts"] and entry.get("is_short"):
+        return "shorts"
+    if filters["min_duration"] and duration is not None and duration < filters["min_duration"]:
+        return "min_duration"
+    if filters["max_duration"] and duration is not None and duration > filters["max_duration"]:
+        return "max_duration"
+    return None
+
+
+def filter_subscription_entries(entries: list[dict], filters: dict) -> tuple[list[dict], list[dict]]:
+    filters = normalize_subscription_filters(filters)
+    accepted, skipped = [], []
+    for entry in entries:
+        (skipped if subscription_filter_reason(entry, filters) else accepted).append(entry)
+    return accepted, skipped
+
+
+def preview_subscription(sub: Subscription, filters: dict) -> dict:
+    """Inspect candidates without changing seen IDs or queuing work."""
+    title, entries = list_flat_entries(sub.url, make_args(sub.options))
+    candidates = (
+        entries[:sub.backfill_count] if sub.backfill == "recent" else []
+    ) if not sub.initialized else [entry for entry in entries if entry["id"] not in sub.seen_ids]
+    candidate_ids = {entry["id"] for entry in candidates}
+    normalized = normalize_subscription_filters(filters)
+    matched = sum(subscription_filter_reason(entry, normalized) is None for entry in candidates)
+    displayed = candidates[:30]
+    if len(displayed) < 30:
+        displayed += [entry for entry in entries if entry["id"] not in candidate_ids][:30 - len(displayed)]
+    return {
+        "title": title,
+        "total_candidates": len(candidates),
+        "would_queue": matched,
+        "filtered": len(candidates) - matched,
+        "items": [{
+            "id": entry["id"], "title": entry["title"], "url": entry["url"],
+            "duration": entry.get("duration"),
+            "reason": subscription_filter_reason(entry, normalized),
+            "eligible": entry["id"] in candidate_ids,
+        } for entry in displayed],
+    }
 
 
 def split_backfill(entries: list[dict], count: int) -> tuple[list[dict], list[dict]]:
@@ -907,6 +999,7 @@ def check_subscription(sub: "Subscription") -> None:
             title, entries = list_flat_entries(sub.url, args)
         except Exception as e:  # noqa: BLE001
             sub.last_error = friendly_error(str(e))
+            sub.last_error_kind = error_details(str(e))["kind"]
             sub.last_checked = time.time()
             return
         if title:
@@ -925,11 +1018,17 @@ def check_subscription(sub: "Subscription") -> None:
             to_queue = [e for e in entries if e["id"] not in sub.seen_ids]
             sub.seen_ids |= current_ids
 
+        sub.last_found = len(to_queue)
+        to_queue, filtered = filter_subscription_entries(to_queue, sub.filters)
+        sub.last_queued = len(to_queue)
+        sub.last_filtered = len(filtered)
+        sub.total_filtered += len(filtered)
         if to_queue:
             urls = [e["url"] for e in to_queue]
             create_jobs(urls, sub.options, source=sub.id)
             sub.total_queued += len(urls)
         sub.last_error = ""
+        sub.last_error_kind = ""
         sub.last_checked = time.time()
     finally:
         SUBSCRIPTION_MANAGER.end_check(sub.id)
@@ -954,6 +1053,7 @@ def subscription_scheduler(stop_event: threading.Event | None = None) -> None:
                 check_subscription(sub)
             except Exception as e:  # noqa: BLE001
                 sub.last_error, sub.last_checked = f"Unexpected error: {friendly_error(str(e))}", time.time()
+                sub.last_error_kind = error_details(str(e))["kind"]
                 save_subscriptions()
                 bump_rev()
 
@@ -1168,13 +1268,13 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 backfill_count = 5
             options = body.get("options") if isinstance(body.get("options"), dict) else {}
-            sub = Subscription(url, options, backfill, backfill_count)
+            sub = Subscription(url, options, backfill, backfill_count, body.get("filters"))
             SUBSCRIPTION_MANAGER.add(sub)
             save_subscriptions()
             start_subscription_check(sub)
             return self._json(subscription_view(sub))
 
-        m = re.fullmatch(r"/api/subscriptions/([0-9a-f]{8})/(update|check-now|remove)", u.path)
+        m = re.fullmatch(r"/api/subscriptions/([0-9a-f]{8})/(update|check-now|preview|remove)", u.path)
         if m:
             sub, action = SUBSCRIPTION_MANAGER.get(m.group(1)), m.group(2)
             if not sub:
@@ -1186,6 +1286,10 @@ class Handler(BaseHTTPRequestHandler):
                     sub.enabled = bool(body["enabled"])
                 if "options" in body and isinstance(body["options"], dict):
                     sub.options = dict(body["options"])
+                if "filters" in body:
+                    if not isinstance(body["filters"], dict):
+                        return self._json({"error": "filters must be an object"}, 400)
+                    sub.filters = normalize_subscription_filters(body["filters"])
                 if body.get("backfill") in ("none", "recent"):
                     sub.backfill = body["backfill"]
                 if "backfill_count" in body:
@@ -1198,6 +1302,13 @@ class Handler(BaseHTTPRequestHandler):
             if action == "check-now":
                 start_subscription_check(sub)
                 return self._json({"ok": True})
+            if action == "preview":
+                if "filters" in body and not isinstance(body["filters"], dict):
+                    return self._json({"error": "filters must be an object"}, 400)
+                try:
+                    return self._json(preview_subscription(sub, body.get("filters", sub.filters)))
+                except Exception as e:  # noqa: BLE001 - extractor/network errors are user-facing diagnostics
+                    return self._json({"error": friendly_error(str(e))}, 502)
             if action == "remove":
                 SUBSCRIPTION_MANAGER.remove(sub.id)
                 save_subscriptions()

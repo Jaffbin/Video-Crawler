@@ -42,6 +42,8 @@ export interface Job {
   eta: string
   item: string
   error: string
+  error_kind?: string
+  error_hint?: string
   files: JobFile[]
   mode: DownloadMode
   created: number
@@ -135,6 +137,15 @@ export type ComponentExtras = 'default' | 'default,deno'
 
 export type BackfillMode = 'none' | 'recent'
 
+export interface SubscriptionFilters {
+  include_keywords: string[]
+  exclude_keywords: string[]
+  exclude_live: boolean
+  exclude_shorts: boolean
+  min_duration: number
+  max_duration: number
+}
+
 export interface Subscription {
   id: string
   url: string
@@ -142,13 +153,19 @@ export interface Subscription {
   enabled: boolean
   backfill: BackfillMode
   backfill_count: number
+  filters: SubscriptionFilters
   mode: DownloadMode
   /** The full download settings this subscription uses for every video it queues. */
   options: DownloadOptions
   created: number
   last_checked: number
   last_error: string
+  last_error_kind?: string
   total_queued: number
+  total_filtered: number
+  last_found: number
+  last_queued: number
+  last_filtered: number
   next_check: number | null
   checking: boolean
 }
@@ -156,4 +173,19 @@ export interface Subscription {
 export interface SubscriptionsResponse {
   subscriptions: Subscription[]
   interval_seconds: number
+}
+
+export interface SubscriptionPreview {
+  title: string
+  total_candidates: number
+  would_queue: number
+  filtered: number
+  items: Array<{
+    id: string
+    title: string
+    url: string
+    duration: number | null
+    reason: string | null
+    eligible: boolean
+  }>
 }

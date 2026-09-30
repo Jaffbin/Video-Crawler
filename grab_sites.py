@@ -48,7 +48,9 @@ class _DownloadTableParser(HTMLParser):
             classes = values.get("class", "").split()
             if self.table_depth or "download-table" in classes:
                 self.table_depth += 1
-        elif self.table_depth and tag.lower() == "a" and values.get("href"):
+        elif self.table_depth and tag.lower() in {"a", "button"} and any(
+            values.get(name) for name in ("href", "data-url", "data-src")
+        ):
             self.current = values
             self.text = []
 
@@ -58,8 +60,12 @@ class _DownloadTableParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         low = tag.lower()
-        if low == "a" and self.current is not None:
-            href = urljoin(self.base_url, self.current["href"])
+        if low in {"a", "button"} and self.current is not None:
+            media_url = next(
+                (self.current.get(name, "") for name in ("href", "data-url", "data-src") if self.current.get(name)),
+                "",
+            )
+            href = urljoin(self.base_url, media_url)
             if href.startswith(("http://", "https://")):
                 label = " ".join("".join(self.text).split())
                 title = re.sub(

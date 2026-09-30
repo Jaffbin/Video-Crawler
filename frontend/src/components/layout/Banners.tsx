@@ -1,10 +1,9 @@
-import type { DoctorCheck } from '../../types/api'
 import { Button } from '../ui/Button'
+import { useI18n } from '../../i18n'
 
 interface Props {
   online: boolean
   ffmpeg: boolean
-  youtubeIssues: DoctorCheck[]
   showYoutubeIssues: boolean
   onOpenDiagnostics: () => void
   onDismissYoutubeIssues: () => void
@@ -13,11 +12,11 @@ interface Props {
 export function Banners({
   online,
   ffmpeg,
-  youtubeIssues,
   showYoutubeIssues,
   onOpenDiagnostics,
   onDismissYoutubeIssues,
 }: Props) {
+  const { t } = useI18n()
   return (
     <>
       {!online && (
@@ -25,25 +24,22 @@ export function Banners({
           role="alert"
           className="border-b border-red-400/15 bg-red-500/[.08] px-4 py-2 text-center text-sm text-red-200"
         >
-          Connection to the local service was lost. Retrying automatically…
+          {t('Connection to the local service was lost. Retrying automatically…')}
         </div>
       )}
       {online && !ffmpeg && (
         <div className="border-b border-amber-400/10 bg-amber-400/[.06] px-4 py-2 text-center text-sm text-amber-200">
-          ffmpeg is not detected. MP4 merging and MP3 conversion will fail.
+          {t('ffmpeg is not detected. MP4 merging and MP3 conversion will fail.')}
         </div>
       )}
       {online && showYoutubeIssues && (
         <div className="flex flex-wrap items-center justify-center gap-3 border-b border-amber-400/10 bg-amber-400/[.06] px-4 py-2 text-sm text-amber-200">
-          <span>
-            YouTube setup incomplete: {youtubeIssues.map((c) => c.label).join(' and ')} not detected. Some
-            YouTube formats may be unavailable.
-          </span>
+          <span>{t('YouTube setup incomplete. Some formats may be unavailable.')}</span>
           <Button variant="ghost" className="!py-1" onClick={onOpenDiagnostics}>
-            Open Diagnostics
+            {t('Open Diagnostics')}
           </Button>
           <Button variant="ghost" className="!py-1" onClick={onDismissYoutubeIssues}>
-            Dismiss
+            {t('Dismiss')}
           </Button>
         </div>
       )}
