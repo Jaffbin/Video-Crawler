@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import runpy
 import sys
 from pathlib import Path
@@ -19,7 +20,8 @@ def main(argv: list[str] | None = None) -> None:
     portable_bootstrap.configure_portable()
     portable_bootstrap.ensure_runtime(with_playwright=options.with_playwright)
 
-    default_args = ["--ui", "window", "--dir", str(APP_ROOT / "downloads")]
+    os.environ.setdefault("GRAB_DEFAULT_DOWNLOAD_DIR", str(APP_ROOT / "downloads"))
+    default_args = ["--ui", "window"]
     sys.argv = [str(APP_ROOT / "webui.py"), *default_args, *webui_args]
     runpy.run_path(str(APP_ROOT / "webui.py"), run_name="__main__")
 

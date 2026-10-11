@@ -59,6 +59,55 @@ def test_build_opts_mp3_and_subtitles(tmp_path):
     assert o["writesubtitles"] and o["writethumbnail"]
 
 
+def test_original_audio_options_keep_separate_cover_and_reject_reencoding(tmp_path, monkeypatch):
+    import yt_dlp
+    from yt_dlp.postprocessor.ffmpeg import FFmpegExtractAudioPP
+    from yt_dlp.utils import PostProcessingError
+    args = args_for(tmp_path, mode="original", cover=True)
+    opts = grab.build_opts(args)
+    assert opts["format"] == "bestaudio/best" and opts["writethumbnail"] is True
+    assert not any(pp["key"] == "EmbedThumbnail" for pp in opts["postprocessors"])
+    with grab.original_audio_downloader(yt_dlp.YoutubeDL)(opts) as ydl:
+        pp = next(pp for pp in ydl._pps["post_process"] if isinstance(pp, FFmpegExtractAudioPP))
+        with pytest.raises(PostProcessingError, match="without conversion"):
+            pp.run_ffmpeg("input", "output", "libmp3lame", [])
+        raw = tmp_path / "unsupported.mp4"
+        raw.write_bytes(b"original")
+        monkeypatch.setattr(pp, "get_audio_codec", lambda path: "unknown_codec")
+        with pytest.raises(PostProcessingError, match="without conversion"):
+            pp.run({"filepath": str(raw), "ext": "mp4"})
+        assert raw.read_bytes() == b"original" and not raw.with_suffix(".mp3").exists()
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg is not installed")
+@pytest.mark.parametrize("codec,extension", [("aac", "m4a"), ("alac", "m4a"), ("libopus", "opus")])
+def test_original_audio_preserves_packets_and_existing_video(media_site, tmp_path, codec, extension):
+    import json
+    import subprocess
+    from conftest import FFMPEG_EXE
+    source = media_site["root"] / "clip.mp4"
+    if codec != "aac":
+        target = media_site["root"] / f"source-{codec}.mkv"
+        subprocess.run([str(FFMPEG_EXE), "-v", "error", "-y", "-i", str(source), "-c:v", "copy", "-c:a", codec,
+                        str(target)], check=True)
+        source = target
+    existing = tmp_path / f"{source.stem} [{source.stem}]{source.suffix}"
+    existing.write_bytes(source.read_bytes())
+    assert grab.attempt(media_site["base"] + "/" + source.name, args_for(tmp_path, mode="original"))
+    result = tmp_path / f"{source.stem} [{source.stem}].{extension}"
+    assert result.is_file() and existing.read_bytes() == source.read_bytes()
+
+    def packets(path):
+        command = [str(FFMPEG_EXE.with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")), "-v", "error",
+                   "-select_streams", "a:0", "-show_packets", "-show_data_hash", "sha256",
+                   "-show_entries", "packet=data_hash", "-of", "json", str(path)]
+        # Container timestamp rounding can change padding side data; compare encoded audio bytes.
+        return [packet["data_hash"] for packet in json.loads(subprocess.check_output(command))["packets"]]
+
+    assert packets(source) == packets(result) and len(packets(result)) > 1
+    assert not (tmp_path / ".work").exists()
+
+
 # ── JavaScript runtime detection (YouTube) ──
 def test_find_deno_prefers_path(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: "/opt/bin/deno" if name == "deno" else None)
@@ -204,6 +253,19 @@ def test_finish_work_moves_only_finished_files(tmp_path):
 
 def test_begin_work_only_for_mp3(tmp_path):
     assert grab.begin_work(args_for(tmp_path, mode="mp4", list_formats=False)) is None
+
+
+def test_mp3_retry_reuses_partial_work_and_success_cleans_it(tmp_path):
+    args = args_for(tmp_path, mode="mp3", list_formats=False)
+    work = grab.begin_work(args, "abcd1234")
+    (work / "clip.mp4.part").write_bytes(b"partial")
+    (work / "completed.mp3").write_bytes(b"finished")
+    grab.finish_work(work, args, preserve_incomplete=True)
+    assert (tmp_path / "completed.mp3").read_bytes() == b"finished"
+    recovered = grab.begin_work(args, "abcd1234")
+    assert recovered == work and (recovered / "clip.mp4.part").read_bytes() == b"partial"
+    grab.finish_work(recovered, args)
+    assert not work.exists()
 
 
 # ── end to end against the local site (needs ffmpeg) ──

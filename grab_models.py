@@ -14,6 +14,13 @@ BACKFILL_MAX = 50
 FILTER_DURATION_MAX = 7 * 24 * 60 * 60
 
 
+def output_complete(path: Path, status: str, explicit=None) -> bool:
+    if isinstance(explicit, bool):
+        return explicit
+    # Only infer legacy fragments when a retained task associates the file with a failed transfer.
+    return status == "done" or not re.search(r"\.f[\w-]+\.(mp4|m4a|webm|mkv|mp3|ogg|opus)$", path.name, re.IGNORECASE)
+
+
 def normalize_subscription_filters(value) -> dict:
     """Return a bounded, JSON-safe subscription filter object.
 
@@ -78,6 +85,7 @@ class Job:
         self.error_hint = ""
         self.files: list[str] = []
         self.seen_paths: list[str] = []
+        self.media_metadata: dict[str, dict] = {}
         self.log: collections.deque[str] = collections.deque(maxlen=400)
         self.cancel = threading.Event()
         self.created = time.time()
@@ -88,21 +96,31 @@ class Job:
         self.notes: list[str] = []
         self._note_keys: set[str] = set()
         self.source: str = ""
+        self.failed_items: list[dict] = []
+        self.work_key = self.id
+        self.resume_pending = False
 
     def to_dict(self, root: Path) -> dict:
         files = []
+        completion = {}
         for filename in self.files:
             try:
                 files.append(Path(filename).resolve().relative_to(root).as_posix())
+                complete = self.media_metadata.get(filename, {}).get("complete")
+                if isinstance(complete, bool):
+                    completion[files[-1]] = complete
             except (ValueError, OSError):
                 pass
         keep_log = list(self.log)[-30:] if self.status in ("error", "canceled") else []
         return {
-            "id": self.id, "url": self.url, "options": self.options, "status": self.status,
+            "id": self.id, "url": self.url, "options": self.options,
+            "status": ("queued" if self.resume_pending else
+                       "canceled" if self.cancel.is_set() and self.status in ("queued", "running") else self.status),
             "stage": self.stage, "title": self.title, "percent": self.percent, "item": self.item,
             "error": self.error, "error_kind": self.error_kind, "error_hint": self.error_hint,
-            "files": files, "created": self.created, "finished": self.finished,
+            "files": files, "completion": completion, "created": self.created, "finished": self.finished,
             "log": [line[:300] for line in keep_log], "notes": self.notes[:3], "source": self.source,
+            "failed_items": self.failed_items, "work_key": self.work_key,
         }
 
     @classmethod
@@ -115,16 +133,13 @@ class Job:
         job.id = job_id
         status = data.get("status")
         interrupted = status in ("queued", "running")
-        job.status = status if status in ("done", "error", "canceled") else "canceled"
-        job.stage = "Last incomplete" if interrupted else {
+        job.status = "queued" if interrupted else status if status in ("done", "error", "canceled") else "canceled"
+        job.stage = "Restored queue" if interrupted else {
             "done": "Done", "error": "Failed", "canceled": "Canceled",
         }[job.status]
         job.title = str(data.get("title") or "")[:300]
         job.item = str(data.get("item") or "")[:20]
-        job.error = (
-            "This task was incomplete when the program exited, you can click 'Retry'."
-            if interrupted else str(data.get("error") or "")[:600]
-        )
+        job.error = "" if interrupted else str(data.get("error") or "")[:600]
         job.error_kind = str(data.get("error_kind") or "")[:40]
         job.error_hint = str(data.get("error_hint") or "")[:400]
         try:
@@ -133,8 +148,8 @@ class Job:
             job.finished = float(data.get("finished") or 0)
         except (TypeError, ValueError):
             job.created = time.time()
-        if interrupted and not job.finished:
-            job.finished = time.time()
+        if interrupted:
+            job.percent, job.finished = 0.0, 0.0
         stored_files = data.get("files")
         for relative in stored_files if isinstance(stored_files, list) else []:
             try:
@@ -142,6 +157,10 @@ class Job:
                 path.relative_to(root)
                 if path.is_file():
                     job.files.append(str(path))
+                    completion = data.get("completion")
+                    complete = completion.get(str(relative)) if isinstance(completion, dict) else None
+                    if isinstance(complete, bool):
+                        job.media_metadata[str(path)] = {"complete": complete}
             except (ValueError, OSError):
                 continue
         stored_log = data.get("log")
@@ -150,6 +169,18 @@ class Job:
         stored_notes = data.get("notes")
         job.notes = [str(note)[:300] for note in stored_notes[:3]] if isinstance(stored_notes, list) else []
         job.source = str(data.get("source") or "")[:8]
+        work_key = str(data.get("work_key") or job.id)
+        job.work_key = work_key if re.fullmatch(r"[0-9a-f]{8}", work_key) else job.id
+        failed = data.get("failed_items")
+        for item in failed if isinstance(failed, list) else []:
+            if not isinstance(item, dict) or not http_url(item.get("url")):
+                continue
+            index = item.get("index")
+            job.failed_items.append({
+                "url": http_url(item["url"]), "title": str(item.get("title") or "")[:300],
+                "index": index if type(index) is int and index > 0 else None,
+                "error": str(item.get("error") or "")[:600],
+            })
         return job
 
     def view(self, root: Path) -> dict:
@@ -157,7 +188,11 @@ class Job:
         for filename in self.files:
             try:
                 path = Path(filename).resolve()
-                files.append({"name": path.name, "path": path.relative_to(root).as_posix()})
+                if not path.is_file():
+                    continue
+                files.append({"name": path.name, "path": path.relative_to(root).as_posix(),
+                              "complete": output_complete(path, self.status,
+                                                          self.media_metadata.get(filename, {}).get("complete"))})
             except (ValueError, OSError):
                 pass
         return {
@@ -167,6 +202,11 @@ class Job:
             "error_kind": self.error_kind, "error_hint": self.error_hint, "files": files,
             "mode": self.options.get("mode", "mp4"), "created": self.created,
             "finished": self.finished, "notes": list(self.notes), "source": self.source,
+            "failed_items": list(self.failed_items),
+            "retry_failed_only": bool(self.failed_items) and (
+                all(item.get("index") for item in self.failed_items) or
+                all(item["url"] != self.url for item in self.failed_items)
+            ),
         }
 
 

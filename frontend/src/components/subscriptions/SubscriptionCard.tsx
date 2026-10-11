@@ -100,7 +100,7 @@ export function SubscriptionCard({ sub, onChanged, onToast }: Props) {
           aria-hidden
           className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-white/[.06] text-zinc-300"
         >
-          {sub.mode === 'mp3' ? <Music size={17} /> : <Film size={17} />}
+          {sub.mode === 'mp3' || sub.mode === 'original' ? <Music size={17} /> : <Film size={17} />}
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-medium" title={sub.url}>

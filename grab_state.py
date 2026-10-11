@@ -3,10 +3,66 @@
 from __future__ import annotations
 
 import queue
+import copy
 import threading
 import time
 
 from grab_models import Job, Subscription
+
+
+class DownloadQueue(queue.Queue):
+    """Pause and reorder only pending work; claiming a job is atomic with controls."""
+
+    def __init__(self):
+        super().__init__()
+        self.paused = False
+        self.stopping = False
+
+    def get(self, block=True, timeout=None):
+        with self.not_empty:
+            deadline = None if timeout is None else time.monotonic() + timeout
+            while self.paused or not self._qsize():
+                if self.stopping:
+                    raise queue.Empty
+                if not block:
+                    raise queue.Empty
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    raise queue.Empty
+                self.not_empty.wait(remaining)
+            if self.stopping:
+                raise queue.Empty
+            job = self._get()
+            if job.status == "queued" and not job.cancel.is_set():
+                job.status, job.stage = "running", "Preparing"
+            self.not_full.notify()
+            return job
+
+    def set_paused(self, paused: bool) -> None:
+        with self.not_empty:
+            self.paused = paused
+            self.not_empty.notify_all()
+
+    def stop(self) -> None:
+        with self.not_empty:
+            self.stopping = True
+            self.not_empty.notify_all()
+
+    def pending_ids(self) -> list[str]:
+        with self.mutex:
+            return [job.id for job in self.queue if job.status == "queued" and not job.cancel.is_set()]
+
+    def move(self, job_id: str, direction: int) -> bool:
+        with self.mutex:
+            positions = [i for i, job in enumerate(self.queue) if job.status == "queued" and not job.cancel.is_set()]
+            current = next((i for i, pos in enumerate(positions) if self.queue[pos].id == job_id), None)
+            if current is None:
+                return False
+            target = current + direction
+            if 0 <= target < len(positions):
+                a, b = positions[current], positions[target]
+                self.queue[a], self.queue[b] = self.queue[b], self.queue[a]
+            return True
 
 
 class JobManager:
@@ -14,17 +70,67 @@ class JobManager:
         self.history_max = history_max
         self.jobs: dict[str, Job] = {}
         self.lock = threading.Lock()
-        self.queue: queue.Queue[Job] = queue.Queue()
+        self.queue = DownloadQueue()
 
-    def enqueue(self, urls: list[str], options: dict, source: str = "") -> list[str]:
+    def batch(self, ids: list[str], action: str) -> tuple[list[str], list[str]]:
+        processed, skipped, retry = [], [], []
+        # Workers claim under the queue mutex, so a queued cancel cannot race a claim.
+        with self.queue.mutex, self.lock:
+            for job_id in ids:
+                job = self.jobs.get(job_id)
+                if not job:
+                    skipped.append(job_id)
+                    continue
+                if action == "cancel" and job.status in ("queued", "running"):
+                    job.cancel.set()
+                    if job.status == "queued":
+                        job.status, job.stage, job.finished = "canceled", "Canceled", time.time()
+                    else:
+                        job.stage = "Canceling…"
+                elif action == "retry" and job.status in ("error", "canceled"):
+                    retry.append(job)
+                elif action == "remove" and job.status in ("done", "error", "canceled"):
+                    self.jobs.pop(job_id)
+                else:
+                    skipped.append(job_id)
+                    continue
+                if action != "retry":
+                    processed.append(job_id)
+        for job in retry:
+            (processed if self.retry(job) else skipped).append(job.id)
+        return processed, skipped
+
+    def retry(self, job: Job) -> list[str]:
+        """Keep playlist indices and output names when only some entries failed."""
+        options = dict(job.options)
+        failed = job.failed_items if job.status == "error" else []
+        if failed and all(item.get("index") for item in failed):
+            options["items"] = ",".join(str(i) for i in sorted({item["index"] for item in failed}))
+            urls = [job.url]
+        elif failed and all(item["url"] != job.url for item in failed):
+            options.update(items="", no_playlist=True)
+            urls = list(dict.fromkeys(item["url"] for item in failed))
+        else:
+            urls = [job.url]
+        return self.enqueue(urls, options, job.source, work_key=job.work_key)
+
+    def enqueue(self, urls: list[str], options: dict, source: str = "", *, work_key: str | None = None) -> list[str]:
         created = []
-        for url in urls:
-            job = Job(url, options)
-            job.source = source
-            with self.lock:
+        # Keep duplicate checks, registry insertion and queue publication atomic.
+        # All operations taking both locks use this order (queue, then registry).
+        with self.queue.not_empty, self.lock:
+            for url in urls:
+                if any(job.url == url and job.options == options and job.status in ("queued", "running")
+                       and not job.cancel.is_set() for job in self.jobs.values()):
+                    continue
+                job = Job(url, copy.deepcopy(options))
+                job.source = source
+                job.work_key = work_key or job.id
                 self.jobs[job.id] = job
-            self.queue.put(job)
-            created.append(job.id)
+                self.queue._put(job)
+                self.queue.unfinished_tasks += 1
+                created.append(job.id)
+            self.queue.not_empty.notify_all()
         self.prune()
         return created
 
@@ -72,6 +178,9 @@ class JobManager:
         """Clear registry and pending queue entries; intended for a fresh runtime or tests."""
         with self.lock:
             self.jobs.clear()
+        self.queue.set_paused(False)
+        with self.queue.mutex:
+            self.queue.stopping = False
         while True:
             try:
                 self.queue.get_nowait()

@@ -108,17 +108,19 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
                   onChange={(e) => onChange({ limit_rate: e.target.value })}
                 />
               </label>
-              <label className="control">
-                <span>{t('Concurrent fragments')}</span>
-                <input
-                  className="field"
-                  type="number"
-                  min={1}
-                  max={16}
-                  value={options.threads}
-                  onChange={(e) => onChange({ threads: number(e.target.value) })}
-                />
-              </label>
+              {(options.mode === 'mp4' || options.mode === 'mp3' || options.mode === 'original') && (
+                <label className="control">
+                  <span>{t('Concurrent fragments')}</span>
+                  <input
+                    className="field"
+                    type="number"
+                    min={1}
+                    max={16}
+                    value={options.threads}
+                    onChange={(e) => onChange({ threads: number(e.target.value) })}
+                  />
+                </label>
+              )}
             </div>
             <label className="control">
               <span>{t('Wait between downloads (seconds)')}</span>
@@ -134,55 +136,61 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
             </label>
           </Section>
 
-          <Section icon={<ListVideo aria-hidden size={14} />} title={t('Batch')}>
-            <label className="control">
-              <span>{t('Playlist range (empty means all)')}</span>
-              <input
-                className="field"
-                placeholder="e.g. 1-5,8,10-"
-                value={options.items}
-                onChange={(e) => onChange({ items: e.target.value })}
-              />
-            </label>
-            <Toggle checked={options.no_playlist} onChange={(v) => onChange({ no_playlist: v })}>
-              {t('If the link belongs to a playlist, download only this video')}
-            </Toggle>
-            <Toggle checked={options.archive} onChange={(v) => onChange({ archive: v })}>
-              {t('Skip videos that were already downloaded')}
-            </Toggle>
-          </Section>
+          {options.mode !== 'image' && (
+            <Section icon={<ListVideo aria-hidden size={14} />} title={t('Batch')}>
+              <label className="control">
+                <span>{t('Playlist range (empty means all)')}</span>
+                <input
+                  className="field"
+                  placeholder="e.g. 1-5,8,10-"
+                  value={options.items}
+                  onChange={(e) => onChange({ items: e.target.value })}
+                />
+              </label>
+              <Toggle checked={options.no_playlist} onChange={(v) => onChange({ no_playlist: v })}>
+                {t('If the link belongs to a playlist, download only this video')}
+              </Toggle>
+              <Toggle checked={options.archive} onChange={(v) => onChange({ archive: v })}>
+                {t('Skip videos that were already downloaded')}
+              </Toggle>
+            </Section>
+          )}
 
-          <Section icon={<MonitorCog aria-hidden size={14} />} title={t('Dynamic pages')}>
-            <Toggle
-              checked={options.js_render && playwright}
-              disabled={!playwright}
-              onChange={(v) => onChange({ js_render: v })}
-            >
-              {t('If no video is found, render the page in a headless browser')}
-            </Toggle>
-            <p className="text-xs leading-5 text-zinc-400">
-              {playwright
-                ? t(
-                    'Playwright detected. On Windows the built-in Edge is used first, so no extra browser download is needed.',
-                  )
-                : t('Playwright is not installed. Run “pip install playwright” and restart to enable this.')}
-            </p>
-            <Toggle checked={options.all_sniffed} onChange={(v) => onChange({ all_sniffed: v })}>
-              {t('Download every media address found on a page, not just the first that works')}
-            </Toggle>
-            <label className="control">
-              <span>{t('Longest wait for the page to play (seconds)')}</span>
-              <input
-                className="field"
-                type="number"
-                min={2}
-                max={30}
-                value={options.js_wait}
+          {(options.mode === 'mp4' || options.mode === 'mp3' || options.mode === 'original') && (
+            <Section icon={<MonitorCog aria-hidden size={14} />} title={t('Dynamic pages')}>
+              <Toggle
+                checked={options.js_render && playwright}
                 disabled={!playwright}
-                onChange={(e) => onChange({ js_wait: number(e.target.value) })}
-              />
-            </label>
-          </Section>
+                onChange={(v) => onChange({ js_render: v })}
+              >
+                {t('If no video is found, render the page in a headless browser')}
+              </Toggle>
+              <p className="text-xs leading-5 text-zinc-400">
+                {playwright
+                  ? t(
+                      'Playwright detected. On Windows the built-in Edge is used first, so no extra browser download is needed.',
+                    )
+                  : t(
+                      'Playwright is not installed. Run “pip install playwright” and restart to enable this.',
+                    )}
+              </p>
+              <Toggle checked={options.all_sniffed} onChange={(v) => onChange({ all_sniffed: v })}>
+                {t('Download every media address found on a page, not just the first that works')}
+              </Toggle>
+              <label className="control">
+                <span>{t('Longest wait for the page to play (seconds)')}</span>
+                <input
+                  className="field"
+                  type="number"
+                  min={2}
+                  max={30}
+                  value={options.js_wait}
+                  disabled={!playwright}
+                  onChange={(e) => onChange({ js_wait: number(e.target.value) })}
+                />
+              </label>
+            </Section>
+          )}
         </div>
       )}
     </div>

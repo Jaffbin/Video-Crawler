@@ -15,6 +15,7 @@ import pytest
 
 import grab
 import webui
+from conftest import HAVE_FFMPEG
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +26,10 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(webui, "ROOT", root)
     monkeypatch.setattr(webui, "CONFIG_DIR", tmp_path / "cfg")
     monkeypatch.setattr(webui, "PORT", 0)
+    monkeypatch.setattr(webui, "PENDING_ROOT", None)
+    monkeypatch.setattr(webui, "NATIVE_WINDOW", None)
+    monkeypatch.setattr(webui, "FILES_CACHE", {"rev": None, "ts": 0.0, "data": []})
+    monkeypatch.setattr(webui, "UPDATE", {"status": "idle", "lines": [], "before": "", "after": "", "error": "", "extras": ""})
     webui.JOB_MANAGER.reset()
     webui.SUBSCRIPTION_MANAGER.reset()
     webui.DOCTOR_CACHE.update(ts=0.0, data=None)
@@ -217,12 +222,295 @@ def test_job_from_dict_rejects_bad_ids_urls_and_paths_outside_the_download_folde
     assert webui.Job.from_dict({**good, "url": "file:///etc/passwd"}, webui.ROOT) is None
 
 
-def test_interrupted_jobs_come_back_as_retryable():
+def test_interrupted_jobs_come_back_as_queued():
     job = webui.Job.from_dict(
         {"id": "abcd1234", "url": "https://example.com/v", "status": "running"},
         webui.ROOT,
     )
-    assert job.status == "canceled" and job.stage == "Last incomplete" and "Retry" in job.error
+    assert job.status == "queued" and job.stage == "Restored queue" and not job.error
+    assert job.percent == 0 and job.finished == 0
+
+
+def test_history_restores_running_and_reordered_waiting_jobs_with_pause():
+    ids = webui.create_jobs([f"https://example.com/{i}" for i in range(4)], {})
+    claimed = webui.QUEUE.get_nowait()
+    assert claimed.id == ids[0]
+    assert webui.QUEUE.move(ids[3], -1)
+    webui.QUEUE.set_paused(True)
+    claimed.resume_pending = True
+    claimed.status = "canceled"  # graceful shutdown canceled its transfer, not the task
+    webui.save_history()
+    webui.QUEUE.task_done()
+    webui.JOB_MANAGER.reset()
+    webui.load_history()
+    assert webui.QUEUE.paused
+    assert webui.QUEUE.pending_ids() == [ids[0], ids[1], ids[3], ids[2]]
+    assert all(job.status == "queued" and not job.cancel.is_set() for job in webui.JOB_MANAGER.snapshot())
+
+
+def test_history_keeps_all_pending_jobs_even_above_finished_history_limit(monkeypatch):
+    monkeypatch.setattr(webui, "HISTORY_MAX", 2)
+    ids = webui.create_jobs([f"https://example.com/{i}" for i in range(5)], {})
+    webui.JOB_MANAGER.reset()
+    webui.load_history()
+    assert webui.QUEUE.pending_ids() == ids
+
+
+def test_legacy_history_loads_and_invalid_order_is_ignored():
+    job = webui.Job("https://example.com/video", {})
+    webui.HISTORY_STORE.save({"version": 1, "jobs": [job.to_dict(webui.ROOT)], "queue_order": {"invalid": 1}})
+    webui.load_history()
+    assert not webui.QUEUE.paused and webui.QUEUE.pending_ids() == [job.id]
+    webui.load_history()
+    assert webui.QUEUE.pending_ids() == [job.id]
+
+
+def test_explicit_cancel_during_shutdown_is_not_automatically_recovered():
+    job = webui.Job("https://example.com/video", {})
+    job.status = "running"
+    job.cancel.set()
+    restored = webui.Job.from_dict(job.to_dict(webui.ROOT), webui.ROOT)
+    assert restored.status == "canceled"
+
+
+def test_repeated_enqueue_and_retry_report_duplicates(server):
+    _, first = call(server, "/api/jobs", {"urls": ["https://example.com/video"], "options": {"quality": "720"}})
+    _, duplicate = call(server, "/api/jobs", {"urls": ["https://example.com/video"], "options": {"quality": "720"}})
+    assert duplicate == {"ids": [], "duplicates": 1}
+    original = webui.JOB_MANAGER.get(first["ids"][0])
+    original.status = "error"
+    original.failed_items = [{"index": 2, "url": "https://example.com/2", "title": "Second", "error": "unavailable"}]
+    status, retry = call(server, f"/api/jobs/{original.id}/retry", {})
+    assert status == 200 and len(retry["ids"]) == 1
+    assert webui.JOB_MANAGER.get(retry["ids"][0]).options["items"] == "2"
+    _, repeated = call(server, f"/api/jobs/{original.id}/retry", {})
+    assert repeated["ids"] == [] and repeated["duplicates"]
+
+
+def test_browser_retry_requires_valid_browser_and_preserves_original_options(server):
+    ids = webui.create_jobs(["https://example.com/video"], {"quality": "720", "use_cookies_file": True})
+    job = webui.JOB_MANAGER.get(ids[0])
+    job.status = "error"
+    job.failed_items = [{"index": 2, "url": "https://example.com/2", "title": "Second", "error": "Login required"}]
+    path = f"/api/jobs/{job.id}/retry-browser"
+    assert call(server, path, {"browser": "chrome"}, token=False)[0] == 401
+    assert call(server, path, {"browser": "unknown"})[0] == 400
+    assert call(server, path, {"browser": []})[0] == 400
+    status, result = call(server, path, {"browser": "chrome"})
+    assert status == 200 and len(result["ids"]) == 1
+    retry = webui.JOB_MANAGER.get(result["ids"][0])
+    assert retry.options["cookies_from_browser"] == "chrome"
+    assert not retry.options["use_cookies_file"] and retry.options["items"] == "2"
+    assert job.options["use_cookies_file"] and not job.options.get("cookies_from_browser")
+    assert call(server, path, {"browser": "chrome"})[1]["duplicates"]
+
+
+def test_setup_endpoints_require_token_and_report_preparation_failure(server, monkeypatch):
+    assert call(server, "/api/setup", {}, token=False)[0] == 401
+    monkeypatch.setattr(webui, "start_setup", lambda: (False, "Preparation unavailable"))
+    status, result = call(server, "/api/setup", {})
+    assert status == 409 and result["error"] == "Preparation unavailable"
+    monkeypatch.setattr(webui, "setup_status", lambda: {"ready": True, "issues": []})
+    assert call(server, "/api/setup")[1]["ready"]
+
+
+def test_folder_selection_is_authenticated_persisted_and_does_not_move_files(server, tmp_path, monkeypatch):
+    original = webui.ROOT
+    (original / "keep.mp4").write_bytes(b"original")
+    target = tmp_path / "new folder 中文"
+    target.mkdir()
+    monkeypatch.setattr(webui, "choose_download_folder", lambda: str(target))
+    assert call(server, "/api/download-folder/select", {}, token=False)[0] == 401
+    status, result = call(server, "/api/download-folder/select", {})
+    assert status == 200 and result == {"canceled": False, "restart_required": True, "root": str(target.resolve())}
+    assert webui.ROOT == original and (original / "keep.mp4").read_bytes() == b"original"
+    assert webui.PENDING_ROOT == target.resolve() and webui.saved_download_root(original) == target.resolve()
+
+
+def test_folder_selection_cancel_and_same_folder_keep_settings(server, monkeypatch):
+    monkeypatch.setattr(webui, "choose_download_folder", lambda: None)
+    assert call(server, "/api/download-folder/select", {})[1]["canceled"]
+    monkeypatch.setattr(webui, "choose_download_folder", lambda: str(webui.ROOT))
+    assert not call(server, "/api/download-folder/select", {})[1]["restart_required"]
+    assert not (webui.CONFIG_DIR / "settings.json").exists() and webui.PENDING_ROOT is None
+
+
+def test_selecting_original_folder_clears_a_previous_pending_change(server, tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "choose_download_folder", lambda: str(tmp_path))
+    assert call(server, "/api/download-folder/select", {})[1]["restart_required"]
+    monkeypatch.setattr(webui, "choose_download_folder", lambda: str(webui.ROOT))
+    assert not call(server, "/api/download-folder/select", {})[1]["restart_required"]
+    assert webui.PENDING_ROOT is None and webui.saved_download_root(tmp_path) == webui.ROOT
+
+
+def test_folder_selection_rechecks_pending_jobs_after_dialog(server, tmp_path, monkeypatch):
+    def select():
+        webui.JOB_MANAGER.enqueue(["https://example.com/video"], {})
+        return str(tmp_path)
+
+    monkeypatch.setattr(webui, "choose_download_folder", select)
+    assert call(server, "/api/download-folder/select", {})[0] == 409
+    assert not (webui.CONFIG_DIR / "settings.json").exists()
+    monkeypatch.setattr(webui, "choose_download_folder", lambda: pytest.fail("Do not open a dialog while jobs are pending"))
+    assert call(server, "/api/download-folder/select", {})[0] == 409
+
+
+def test_folder_selection_rejects_unwritable_directory(server, tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "choose_download_folder", lambda: str(tmp_path))
+    monkeypatch.setattr(webui.tempfile, "TemporaryFile", lambda **kw: (_ for _ in ()).throw(PermissionError("locked")))
+    status, result = call(server, "/api/download-folder/select", {})
+    assert status == 409 and "cannot save" in result["error"]
+    assert webui.PENDING_ROOT is None
+
+
+def test_native_folder_picker_uses_current_root(monkeypatch):
+    seen = []
+    fake_window = types.SimpleNamespace(create_file_dialog=lambda kind, **kw: seen.append((kind, kw)) or (str(webui.ROOT),))
+    monkeypatch.setattr(webui, "NATIVE_WINDOW", fake_window)
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace(FileDialog=types.SimpleNamespace(FOLDER=20)))
+    assert webui.choose_download_folder() == str(webui.ROOT)
+    assert seen == [(20, {"directory": str(webui.ROOT)})]
+
+
+def test_saved_folder_keeps_explicit_cli_override(tmp_path, monkeypatch):
+    from grab_config import parse_web_config
+    monkeypatch.delenv("GRAB_DEFAULT_DOWNLOAD_DIR", raising=False)
+    assert not parse_web_config([]).download_dir_explicit
+    config = parse_web_config(["--dir", str(tmp_path)])
+    assert config.download_dir_explicit and config.download_dir == tmp_path.resolve()
+    assert webui.saved_download_root(tmp_path) == tmp_path
+
+
+def test_restart_applies_pending_folder_and_reopens_native_window(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(webui, "PENDING_ROOT", tmp_path)
+    monkeypatch.setattr(webui, "WINDOW_MODE", True)
+    monkeypatch.setattr(webui.sys, "platform", "win32")
+    monkeypatch.setattr(webui.subprocess, "Popen", lambda args, **kw: seen.update(args=args, env=kw["env"]))
+    monkeypatch.setattr(webui.os, "_exit", lambda code: (_ for _ in ()).throw(RuntimeError("exit intercepted")))
+    with pytest.raises(RuntimeError, match="exit intercepted"):
+        webui.restart_self()
+    assert seen["args"][seen["args"].index("--dir") + 1] == str(tmp_path)
+    assert seen["args"][seen["args"].index("--ui") + 1] == "window"
+    assert seen["env"]["GRAB_RESTART_WINDOW"] == "1"
+
+
+def test_batch_trash_returns_only_successful_ids_for_undo(server):
+    for name in ("video.mp4", "video.jpg", "video.en.srt"):
+        (webui.ROOT / name).write_bytes(name.encode())
+    status, result = call(server, "/api/library/batch", {"items": ["video.mp4", "missing.mp4"], "action": "trash"})
+    assert status == 200 and result["processed"] == ["video.mp4"]
+    assert len(result["recovery_ids"]) == len(result["failed"]) == 1
+    _, restored = call(server, "/api/library/batch", {"items": result["recovery_ids"], "action": "restore"})
+    assert restored["processed"] == result["recovery_ids"]
+    for name in ("video.mp4", "video.jpg", "video.en.srt"):
+        assert (webui.ROOT / name).read_bytes() == name.encode()
+
+
+@pytest.mark.parametrize("failure", ["503", "interrupted"])
+def test_video_download_recovers_from_temporary_http_failure(media_site, monkeypatch, failure):
+    import http.server
+    import grab_download
+    monkeypatch.setattr(grab_download, "RETRY_DELAYS", (0, 0))
+    requests = []
+    clip = (media_site["root"] / "clip.mp4").read_bytes()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            if failure == "503" and len(requests) == 1:
+                self.send_response(503)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(clip)))
+            self.end_headers()
+            if failure == "interrupted" and len(requests) == 2:
+                self.wfile.write(clip[:1024])
+                self.close_connection = True
+                return
+            self.wfile.write(clip)
+
+        def log_message(self, *args):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        job = webui.Job(f"http://127.0.0.1:{srv.server_port}/clip.mp4", {"mode": "mp4"})
+        webui.run_job(job)
+        assert job.status == "done" and not job.failed_items, list(job.log)
+        assert any("[Retry]" in line for line in job.log)
+        assert len(job.files) == 1 and Path(job.files[0]).is_file()
+        details = json.loads(subprocess.check_output([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", job.files[0],
+        ], text=True))
+        assert float(details["format"]["duration"]) >= 1.9
+        assert {stream["codec_type"] for stream in details["streams"]} == {"video", "audio"}
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        thread.join(2)
+
+
+def test_pause_and_order_changes_are_saved_immediately(server):
+    ids = webui.create_jobs(["https://example.com/1", "https://example.com/2"], {})
+    call(server, "/api/queue", {"paused": True})
+    call(server, f"/api/jobs/{ids[1]}/move-up", {})
+    webui.JOB_MANAGER.reset()
+    webui.load_history()
+    assert webui.QUEUE.paused and webui.QUEUE.pending_ids() == ids[::-1]
+
+
+def test_scan_reports_entry_and_depth_limits(server, monkeypatch):
+    for i in range(3):
+        (webui.ROOT / f"{i}.mp4").write_bytes(b"media")
+    monkeypatch.setattr(webui, "FILE_SCAN_MAX_ENTRIES", 2)
+    _, state = call(server, "/api/state?rev=-1")
+    assert len(state["files"]) == 2
+    scan = state["library_scan"]
+    assert scan["incomplete"] and scan["reasons"] == ["entry_limit"] and scan["checked"] == 2
+    monkeypatch.setattr(webui, "FILE_SCAN_MAX_ENTRIES", 20000)
+    nested = webui.ROOT / "a" / "b" / "c" / "d"
+    nested.mkdir(parents=True)
+    (nested / "deep.mp4").write_bytes(b"media")
+    _, state = call(server, "/api/state?rev=-1")
+    assert len(state["files"]) == 3
+    assert state["library_scan"]["reasons"] == ["depth_limit"]
+
+
+def test_scan_keeps_more_than_5000_discovered_files(tmp_path, monkeypatch):
+    class Entry:
+        name = "video.mp4"
+
+        def __init__(self, i):
+            self.name = f"{i}.mp4"
+            self.path = str(webui.ROOT / self.name)
+
+        def is_dir(self, **kwargs):
+            return False
+
+        def is_file(self, **kwargs):
+            return True
+
+        def stat(self):
+            return types.SimpleNamespace(st_size=10, st_mtime=1)
+
+    class Scan:
+        def __iter__(self):
+            return iter(Entry(i) for i in range(5002))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(webui.os, "scandir", lambda path: Scan())
+    assert len(webui.list_files(force=True)) == 5002
+    assert not webui.FILES_CACHE["scan"]["incomplete"]
 
 
 # ───────────────────────── cookies.txt ─────────────────────────
@@ -301,6 +589,7 @@ def test_collect_doctor_includes_cookies_and_recent_failures():
 
 # ───────────────────────── job notes ─────────────────────────
 def test_a_missing_js_runtime_warning_becomes_a_visible_note(monkeypatch):
+    monkeypatch.setattr(grab, "media_tool_check", lambda *args: {"status": "ok"})
     def fake_discover(url, args, download_one, log, on_title, check):
         log("Warning: [youtube] No supported JavaScript runtime could be found. Only deno is enabled by default")
         log("Warning: [youtube] n challenge solving failed: Some formats may be missing")   # same rule, one note
@@ -354,6 +643,13 @@ def test_portable_update_targets_embedded_site_packages(monkeypatch, tmp_path):
     assert "--ignore-installed" in FakeProc.cmd
     assert FakeProc.cmd[FakeProc.cmd.index("--target") + 1] == str(python_dir / "Lib" / "site-packages")
     assert webui.UPDATE["status"] == "done"
+
+
+def test_setup_package_install_stays_running_until_final_tool_checks(monkeypatch):
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: FakeProc(cmd))
+    webui.UPDATE["status"] = "running"
+    webui._do_update("default,deno", preparing=True)
+    assert webui.UPDATE["status"] == "running"
 
 
 def test_update_is_refused_while_jobs_are_active():
@@ -484,6 +780,192 @@ def test_the_report_this_issue_boilerplate_is_not_a_login_problem():
            "filling out the appropriate issue template. Confirm you are on the latest version using  yt-dlp -U")
     msg = webui.friendly_error(raw)
     assert "requires login" not in msg and "please report" not in msg and "Something unexpected happened" in msg
+
+
+def test_probe_size_accounts_for_separate_streams_and_mp3_bitrate():
+    args = webui.make_args({"mode": "mp4"})
+    assert webui.estimate_media_size({"requested_formats": [{"filesize": 100}, {"filesize": 20}]}, args) == {
+        "bytes": 120, "approximate": False,
+    }
+    assert webui.estimate_media_size({"requested_formats": [{"filesize": 100}, {}]}, args)["bytes"] is None
+    assert webui.estimate_media_size({"duration": 10, "tbr": 800}, args) == {"bytes": 1_000_000, "approximate": True}
+    assert webui.estimate_media_size({"duration": 10}, webui.make_args({"mode": "mp3", "abr": 128}))["bytes"] == 160_000
+
+
+def test_original_audio_uses_source_size_and_preserves_settings():
+    args = webui.make_args({"mode": "original", "abr": 96, "quality": "720", "cover": True})
+    assert args.mode == "original" and args.keep_cover is True
+    assert webui.estimate_media_size({"filesize": 12345}, args) == {"bytes": 12345, "approximate": False}
+
+
+def test_organization_api_auth_validation_and_state_refresh(server):
+    (webui.ROOT / "clip.mp4").write_bytes(b"video")
+    assert call(server, "/api/library/collections", {"action": "create", "name": "学习"}, token=False)[0] == 401
+    status, result = call(server, "/api/library/collections", {"action": "create", "name": "学习"})
+    assert status == 200
+    key = result["id"]
+    status, organized = call(server, "/api/library/organize", {
+        "items": ["clip.mp4", "../outside.mp4"], "favorite": True, "collection_id": key,
+    })
+    assert status == 200 and organized["processed"] == ["clip.mp4"] and len(organized["failed"]) == 1
+    state = call(server, "/api/state")[1]
+    assert state["collections"] == [{"id": key, "name": "学习"}]
+    assert state["files"][0]["favorite"] is True and state["files"][0]["collections"] == [key]
+    assert call(server, "/api/library/organize", {"items": ["clip.mp4"], "favorite": "false"})[0] == 400
+    assert call(server, "/api/library/collections", {"action": "delete", "id": []})[0] == 400
+    assert call(server, "/api/library/organize", {"items": ["clip.mp4"], "collection_id": []})[0] == 400
+    assert call(server, "/api/library/collections", {"action": "delete", "id": key})[0] == 200
+    updated = call(server, "/api/state?rev=" + str(state["rev"]))[1]
+    assert updated["rev"] != state["rev"] and updated["collections"] == []
+    assert updated["files"][0]["collections"] == [] and updated["files"][0]["favorite"] is True
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg is not installed")
+def test_original_audio_queue_finishes_and_library_remembers_audio(media_site):
+    job = webui.Job(media_site["base"] + "/clip.mp4", {"mode": "original"})
+    webui.run_job(job)
+    assert job.status == "done" and not job.failed_items
+    assert len(job.files) == 1 and Path(job.files[0]).suffix == ".m4a"
+    assert job.media_metadata[job.files[0]]["complete"] is True
+    files = webui.list_files(force=True)
+    assert len(files) == 1 and files[0]["kind"] == "audio" and files[0]["complete"] is True
+
+
+def test_probe_keeps_playlist_indices_and_limits_preview_work(monkeypatch):
+    seen = {}
+
+    class FakeYdl:
+        def __init__(self, opts): seen.update(opts)
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+        def extract_info(self, *args, **kwargs):
+            return {"_type": "playlist", "playlist_count": 300, "entries": [None, {"title": "Second", "duration": 90}]}
+
+    monkeypatch.setattr(webui.yt_dlp, "YoutubeDL", FakeYdl)
+    result = webui.probe("https://example.com/playlist", {"quality": "720", "referer": "https://example.com/"})
+    assert result["playlist_entries"] == [{"index": 2, "title": "Second", "duration": 90}]
+    assert result["count"] == 300 and seen["playlistend"] == 100
+    assert seen["format"] == grab.video_format("720") and seen["http_headers"]["Referer"] == "https://example.com/"
+
+
+def test_batch_controls_and_waiting_order_endpoints(server):
+    ids = call(server, "/api/jobs", {"urls": ["https://example.com/1", "https://example.com/2"]})[1]["ids"]
+    assert call(server, "/api/queue", {"paused": True})[0] == 200
+    assert call(server, f"/api/jobs/{ids[1]}/move-up", {})[0] == 200
+    state = call(server, "/api/state")[1]
+    assert state["queue_paused"] and state["queue_order"] == ids[::-1]
+    status, result = call(server, "/api/jobs/batch", {"ids": [ids[0], ids[0], "deadbeef"], "action": "cancel"})
+    assert status == 200 and result == {"processed": [ids[0]], "skipped": ["deadbeef"]}
+    assert call(server, "/api/jobs/batch", {"ids": ["../x"], "action": "remove"})[0] == 400
+    assert call(server, "/api/queue", {"paused": "false"})[0] == 400
+
+
+@pytest.mark.parametrize("incomplete", [False, True])
+def test_library_endpoints_update_job_paths_and_recover_files(server, incomplete):
+    path = webui.ROOT / "video.mp4"
+    path.write_bytes(b"media")
+    job = webui.Job("https://example.com/video", {})
+    job.status, job.files = "done", [str(path)]
+    if incomplete:
+        job.status = "error"
+        job.media_metadata[str(path)] = {"complete": False}
+    webui.JOB_MANAGER.add_restored(job)
+    webui.LIBRARY.remember({"video.mp4": {"source_url": job.url}})
+    assert call(server, "/api/library/rename", {"path": "video.mp4", "name": "new.mp4"})[0] == 200
+    assert job.view(webui.ROOT)["files"][0]["path"] == "new.mp4"
+    assert job.view(webui.ROOT)["files"][0]["complete"] is not incomplete
+    recovery_id = call(server, "/api/library/trash", {"path": "new.mp4"})[1]["id"]
+    assert job.view(webui.ROOT)["files"] == [] and webui.list_files() == []
+    stored = next((webui.ROOT / ".grab-trash").iterdir())
+    assert call(server, "/files/.grab-trash/" + stored.name)[0] == 404
+    assert call(server, "/api/library/trash")[1]["items"][0]["id"] == recovery_id
+    assert call(server, "/api/library/restore", {"id": recovery_id})[0] == 200
+    assert job.view(webui.ROOT)["files"][0]["path"] == "new.mp4"
+    assert webui.list_files()[0]["complete"] is not incomplete
+    assert webui.list_files()[0]["source_url"] == job.url
+    job.status = "running"
+    assert call(server, "/api/library/trash", {"path": "new.mp4"})[0] == 409
+    assert (webui.ROOT / "new.mp4").is_file()
+
+
+def test_library_batch_partial_failure_and_recovery(server):
+    for name in ("one.mp4", "two.mp4"):
+        (webui.ROOT / name).write_bytes(b"media")
+    status, result = call(server, "/api/library/batch", {"action": "trash", "items": ["one.mp4", "one.mp4", "missing.mp4", "../outside.mp4", "two.mp4"]})
+    assert status == 200 and result["processed"] == ["one.mp4", "two.mp4"]
+    assert len(result["failed"]) == 2
+    items = call(server, "/api/library/trash")[1]["items"]
+    assert sum(item["size"] for item in items) == 10
+    assert call(server, "/api/library/batch", {"action": "restore", "items": [items[0]["id"]]})[1]["processed"] == [items[0]["id"]]
+    assert call(server, "/api/library/batch", {"action": "purge", "items": [items[1]["id"]]})[1]["processed"] == [items[1]["id"]]
+    assert call(server, "/api/library/trash")[1]["items"] == []
+
+
+@pytest.mark.parametrize("body", [{"action": "purge", "items": []}, {"action": "delete", "items": ["one.mp4"]}, {"action": "trash", "items": [3]}, {"action": "trash", "items": ["one.mp4"] * 201}])
+def test_library_batch_rejects_invalid_input(server, body):
+    assert call(server, "/api/library/batch", body)[0] == 400
+
+
+def test_repair_request_uses_saved_settings_and_prevents_duplicates(server):
+    (webui.ROOT / "video.mp4").write_bytes(b"media")
+    webui.LIBRARY.remember({"video.mp4": {"complete": False, "source_url": "https://example.com/video", "repair_options": {"mode": "mp4", "cover": True}}})
+    assert webui.list_files(force=True)[0]["can_repair"]
+    result = call(server, "/api/library/repair", {"path": "video.mp4"})[1]
+    assert len(result["ids"]) == 1
+    job = webui.JOB_MANAGER.get(result["ids"][0])
+    assert job.options["_repair_path"] == "video.mp4"
+    assert call(server, "/api/library/repair", {"path": "video.mp4"})[1]["duplicates"]
+    assert call(server, "/api/library/repair", {"path": "../outside.mp4"})[0] == 400
+    webui.LIBRARY.remember({"video.mp4": {"complete": True}})
+    assert call(server, "/api/library/repair", {"path": "video.mp4"})[0] == 400
+
+
+def test_recovery_purge_endpoint(server):
+    path = webui.ROOT / "video.mp4"
+    path.write_bytes(b"media")
+    recovery_id = call(server, "/api/library/trash", {"path": path.name})[1]["id"]
+    job = webui.Job("https://example.com/video", {})
+    job.status = "running"
+    webui.JOB_MANAGER.add_restored(job)
+    assert call(server, "/api/library/purge", {"id": recovery_id})[0] == 409
+    assert webui.LIBRARY.trash_items()
+    job.status = "done"
+    assert call(server, "/api/library/purge", {"id": "../other.mp4"})[0] == 404
+    assert call(server, "/api/library/purge", {"id": recovery_id}) == (200, {"ok": True})
+    assert not webui.LIBRARY.trash_items()
+    assert call(server, "/api/library/restore", {"id": recovery_id})[0] == 404
+
+
+def test_legacy_fragment_flag_survives_rename_history_removal_and_recovery(server):
+    path = webui.ROOT / "video.f400.mp4"
+    path.write_bytes(b"unfinished video")
+    job = webui.Job("https://example.com/video", {})
+    job.status, job.files = "error", [str(path)]
+    webui.JOB_MANAGER.add_restored(job)
+    assert call(server, "/api/library/rename", {"path": path.name, "name": "renamed.mp4"})[0] == 200
+    assert job.view(webui.ROOT)["files"][0]["complete"] is False
+    recovery_id = call(server, "/api/library/trash", {"path": "renamed.mp4"})[1]["id"]
+    webui.JOB_MANAGER.reset()
+    assert call(server, "/api/library/restore", {"id": recovery_id})[0] == 200
+    assert webui.list_files(force=True)[0]["complete"] is False
+
+
+def test_library_metadata_survives_history_removal_and_refresh_detects_external_files(server):
+    assert call(server, "/api/state?rev=-1")[1]["files"] == []
+    (webui.ROOT / "external.mp4").write_bytes(b"media")
+    webui.LIBRARY.remember({"external.mp4": {"source_url": "https://example.com/video", "title": "Original"}})
+    webui.JOB_MANAGER.reset()
+    files = call(server, "/api/state?rev=-1")[1]["files"]
+    assert files[0]["source_url"] == "https://example.com/video" and files[0]["title"] == "Original"
+
+
+def test_open_source_url_only_accepts_http_urls(server, monkeypatch):
+    opened = []
+    monkeypatch.setattr(webui.webbrowser, "open", lambda url: opened.append(url) or True)
+    assert call(server, "/api/open-url", {"url": "file:///C:/private.txt"})[0] == 400
+    assert opened == []
+    assert call(server, "/api/open-url", {"url": "https://example.com/video"})[1] == {"ok": True}
+    assert opened == ["https://example.com/video"]
 
 
 # ───────────────────────── Subscriptions ─────────────────────────

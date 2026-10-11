@@ -1,5 +1,5 @@
 """
-grab.py - universal web video / audio downloader (yt-dlp + ffmpeg)
+grab.py - universal web video / audio / image downloader (yt-dlp + ffmpeg)
 
 What it does
   * Mainstream video sites, playlists and channels (everything yt-dlp supports)
@@ -8,6 +8,7 @@ What it does
   * Pages that load their video with JavaScript: --js-render captures the media
     requests with a headless browser (Playwright)
   * Output as MP4 (with a quality cap) or MP3 (with a bitrate)
+  * Original-format video covers and direct images, without ffmpeg
   * Batch downloads, subtitles (optionally embedded) and cover art
   * --doctor checks your setup (ffmpeg, JavaScript runtime, cookies, network)
 
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import functools
 import html
 import importlib.metadata as importlib_metadata
 import importlib.util
@@ -56,7 +58,7 @@ UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
-MEDIA_EXT = r"(?:m3u8|mpd|mp4|webm|mov|m4v|mp3|m4a|aac|flac|ogg)"
+MEDIA_EXT = r"(?:m3u8|mpd|mp4|webm|mov|m4v|mp3|m4a|aac|flac|ogg|opus|wav|aiff|aif|wma|mka)"
 
 FFMPEG_HELP = """ffmpeg not found (required for merging audio/video and MP3 conversion). Installation:
   Windows : winget install Gyan.FFmpeg     (reopen terminal after installation)
@@ -66,6 +68,8 @@ FFMPEG_HELP = """ffmpeg not found (required for merging audio/video and MP3 conv
 EXAMPLES = """Examples:
   python grab.py URL                              # Download highest quality MP4
   python grab.py URL -m mp3 --abr 320             # Audio only, 320kbps MP3
+  python grab.py URL -m cover                    # Save only the video cover
+  python grab.py IMAGE_URL -m image              # Save the original image
   python grab.py URL -q 720                       # MP4, max 720p
   python grab.py -i urls.txt -o D:/videos         # Batch (one URL per line)
   python grab.py PLAYLIST_URL --items 1-10        # First 10 items of a playlist
@@ -87,7 +91,7 @@ def quality_type(v: str) -> str:
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
         prog="grab.py",
-        description="Universal web video / audio downloader (MP4 / MP3)",
+        description="Universal web video / audio / image downloader (MP4 / MP3 / covers / images)",
         epilog=EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -97,7 +101,8 @@ def parse_args(argv=None):
     p.add_argument("-o", "--output", default="downloads", help="Save directory (default: ./downloads)")
 
     g = p.add_argument_group("Format and Quality")
-    g.add_argument("-m", "--mode", choices=["mp4", "mp3"], default="mp4", help="Output type (default: mp4)")
+    g.add_argument("-m", "--mode", choices=["mp4", "mp3", "original", "cover", "image"], default="mp4",
+                   help="Output type: mp4, mp3, original audio, cover only, or direct image (default: mp4)")
     g.add_argument("-q", "--quality", type=quality_type, default="best",
                    help="Max MP4 quality: best or 2160/1440/1080/720/480/360 (default: best)")
     g.add_argument("--abr", type=int, choices=(96, 128, 192, 256, 320), default=192,
@@ -122,6 +127,7 @@ def parse_args(argv=None):
     g.add_argument("--cookies", metavar="FILE", help="Netscape format cookies.txt")
     g.add_argument("--referer", help="Manually specify Referer (for hotlink protection sites)")
     g.add_argument("--proxy", help="Proxy, e.g., http://127.0.0.1:7890")
+    g.add_argument("--ffmpeg-location", help="ffmpeg executable or directory (also GRAB_FFMPEG_LOCATION)")
     g.add_argument("--limit-rate", metavar="RATE", help="Rate limit, e.g., 2M, 500K")
     g.add_argument("--sleep", type=float, default=0, metavar="SEC", help="Wait seconds between each download (more polite for batches)")
     g.add_argument("--threads", type=int, default=4, help="Concurrent fragment threads, speeds up m3u8 / DASH (default: 4)")
@@ -181,6 +187,8 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
     out = Path(args.output).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
     base = str(work_dir or out).replace("%", "%%")   # Process MP3s in a temp dir first, see begin_work
+    if args.mode == "cover":
+        base += "/covers"
 
     if name:  # Direct links from page scan: name with page title
         safe = sanitize_filename(name)[:120].replace("%", "%%") or "video"
@@ -201,17 +209,20 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
         "continuedl": True,
         "windowsfilenames": True,
     }
-    if args.list_formats:
+    location = ffmpeg_location(getattr(args, "ffmpeg_location", None))
+    if location:
+        opts["ffmpeg_location"] = location
+    if args.list_formats and args.mode != "image":
         opts["listformats"] = True
         return opts
 
     pps: list[dict] = []
 
     # Covers / Subtitles: convert to common format first
-    if args.cover:
+    if args.cover and args.mode in ("mp4", "mp3", "original"):
         opts["writethumbnail"] = True
         pps.append({"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"})
-    if args.subs or args.embed_subs:
+    if args.mode in ("mp4", "mp3", "original") and (args.subs or args.embed_subs):
         opts["writesubtitles"] = True
         opts["subtitleslangs"] = [s.strip() for s in args.sub_langs.split(",") if s.strip()]
         if args.auto_subs:
@@ -219,21 +230,25 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
         pps.append({"key": "FFmpegSubtitlesConvertor", "format": args.sub_format, "when": "before_dl"})
 
     # Formats
-    if args.mode == "mp3":
+    if args.mode in ("mp3", "original"):
         opts["format"] = "bestaudio/best"
-        pps.append({"key": "FFmpegExtractAudio", "preferredcodec": "mp3",
+        pps.append({"key": "FFmpegExtractAudio", "preferredcodec": "best" if args.mode == "original" else "mp3",
                     "preferredquality": str(args.abr)})
-    else:
+    elif args.mode == "mp4":
         opts["format"] = video_format(args.quality)
         opts["merge_output_format"] = "mp4"
         pps.append({"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"})  # Lossless remux if not mp4 container
         if args.embed_subs:
             pps.append({"key": "FFmpegEmbedSubtitle", "already_have_subtitle": True})
 
-    pps.append({"key": "FFmpegMetadata", "add_chapters": True, "add_metadata": True})
-    if args.cover:
+    if args.mode in ("mp4", "mp3", "original"):
+        pps.append({"key": "FFmpegMetadata", "add_chapters": True, "add_metadata": True})
+    if args.cover and args.mode in ("mp4", "mp3"):
         pps.append({"key": "EmbedThumbnail", "already_have_thumbnail": args.keep_cover})
     opts["postprocessors"] = pps
+    if args.mode == "cover":
+        opts.update(skip_download=True, writethumbnail=True, ignore_no_formats_error=True,
+                    allow_playlist_files=False, force_write_download_archive=True)
 
     # Network / Login
     headers = {"User-Agent": UA}
@@ -255,7 +270,9 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
     if args.cookies_from_browser:
         opts["cookiesfrombrowser"] = (args.cookies_from_browser,)
     if args.archive:
-        opts["download_archive"] = args.archive
+        opts["download_archive"] = args.archive + (".covers" if args.mode == "cover" else "")
+    if args.mode in ("cover", "image"):
+        opts["socket_timeout"] = 20
     if args.items:
         opts["playlist_items"] = args.items
     return opts
@@ -264,35 +281,65 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
 # ───────────────────────── Download Workflow ─────────────────────────
 
 WORK_KEEP = {".mp3", ".srt", ".vtt", ".ass", ".jpg", ".jpeg", ".png", ".webp"}
+AUDIO_SUFFIXES = {".mp3", ".m4a", ".aac", ".alac", ".flac", ".ogg", ".opus", ".wav", ".aiff", ".aif", ".wma", ".mka"}
 
 
-def begin_work(args) -> Path | None:
-    """MP3 mode first downloads and converts in a temp directory, then moves to target directory.
+def original_audio_downloader(base):
+    """Prevent yt-dlp's 'best' audio fallback from silently re-encoding unknown codecs."""
+    from yt_dlp.postprocessor.ffmpeg import FFmpegExtractAudioPP
+    from yt_dlp.utils import PostProcessingError
+
+    class OriginalAudioPP(FFmpegExtractAudioPP):
+        def run_ffmpeg(self, path, out_path, codec, more_opts):
+            if codec != "copy":
+                raise PostProcessingError("This source audio cannot be saved without conversion. Choose MP3 instead.")
+            # yt-dlp's ALAC mapping includes a codec override even on its 'copy' branch.
+            options, values = [], iter(more_opts)
+            for option in values:
+                if option in ("-acodec", "-c:a", "-codec:a"):
+                    next(values, None)
+                else:
+                    options.append(option)
+            return super().run_ffmpeg(path, out_path, codec, options)
+
+    class OriginalDownloader(base):
+        def add_post_processor(self, pp, when="post_process"):
+            if isinstance(pp, FFmpegExtractAudioPP) and pp.mapping == "best":
+                pp = OriginalAudioPP(self, preferredcodec="best")
+            return super().add_post_processor(pp, when)
+
+    return OriginalDownloader
+
+
+def begin_work(args, work_key: str | None = None) -> Path | None:
+    """Audio modes extract in a temp directory, then move to the target directory.
 
     Otherwise, if the direct link is itself an .mp4, converting to MP3 would delete an existing MP4 with the same name.
     """
-    if args.mode != "mp3" or getattr(args, "list_formats", False):
+    if args.mode not in ("mp3", "original") or getattr(args, "list_formats", False):
         return None
-    work = Path(args.output).expanduser().resolve() / ".work" / uuid.uuid4().hex[:8]
+    work = Path(args.output).expanduser().resolve() / ".work" / (work_key or uuid.uuid4().hex[:8])
     work.mkdir(parents=True, exist_ok=True)
     return work
 
 
-def finish_work(work: Path | None, args) -> dict[str, str]:
-    """Move finished files (MP3, subtitles, cover) from temp directory to target directory, return {old path: new path}, and clean up temp files."""
+def finish_work(work: Path | None, args, *, preserve_incomplete: bool = False) -> dict[str, str]:
+    """Publish finished audio and companions, return moved paths, and retain partial work on failure."""
     moved: dict[str, str] = {}
     if work is None:
         return moved
     out = Path(args.output).expanduser().resolve()
+    keep = WORK_KEEP | AUDIO_SUFFIXES if args.mode == "original" else WORK_KEEP
     try:
         for f in sorted(work.rglob("*")):
-            if f.is_file() and f.suffix.lower() in WORK_KEEP:
+            if f.is_file() and f.suffix.lower() in keep:
                 dest = out / f.relative_to(work)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(f, dest)
                 moved[str(f)] = str(dest)
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        if not preserve_incomplete:
+            shutil.rmtree(work, ignore_errors=True)
         try:
             work.parent.rmdir()  # delete .work if empty
         except OSError:
@@ -303,7 +350,11 @@ def finish_work(work: Path | None, args) -> dict[str, str]:
 def attempt(url: str, args, referer: str | None = None, name: str | None = None) -> bool:
     work = begin_work(args)
     try:
-        with yt_dlp.YoutubeDL(build_opts(args, referer, name, work)) as ydl:
+        from grab_images import thumbnail_downloader
+        downloader = thumbnail_downloader(yt_dlp.YoutubeDL, Path(args.output)) if args.mode == "cover" else yt_dlp.YoutubeDL
+        if args.mode == "original":
+            downloader = original_audio_downloader(downloader)
+        with downloader(build_opts(args, referer, name, work)) as ydl:
             return ydl.download([url]) == 0
     except DownloadError:
         return False  # yt-dlp has already printed the error reason
@@ -394,7 +445,7 @@ class JSRenderError(RuntimeError):
 
 
 _SEGMENT = re.compile(r"\.(?:ts|m4s|aac|cmfv|cmfa|vtt|webvtt|srt|key)$", re.I)
-_MEDIA_PATH = re.compile(r"\.(?:mp4|webm|mov|m4v|mp3|m4a|flac|ogg)$", re.I)
+_MEDIA_PATH = re.compile(r"\.(?:mp4|webm|mov|m4v|mp3|m4a|aac|flac|ogg|opus|wav|aiff|aif|wma|mka)$", re.I)
 
 # Inside the page (including all iframes): click common large play buttons, and mute <video>/<audio> while playing,
 # and return their current http(s) addresses.
@@ -561,7 +612,7 @@ def discover_and_download(url: str, args, download_one, log=print, on_title=None
     """
     if download_one(url):
         return True
-    if args.list_formats or args.no_sniff or has_specific_extractor(url):
+    if args.mode == "cover" or args.list_formats or args.no_sniff or has_specific_extractor(url):
         return False
 
     tried: set[str] = set()
@@ -622,10 +673,71 @@ def discover_and_download(url: str, args, download_one, log=print, on_title=None
 
 
 def process(url: str, args) -> bool:
+    if args.mode == "image":
+        from grab_images import download_image, probe_image
+        from yt_dlp.networking.exceptions import RequestError
+        try:
+            with yt_dlp.YoutubeDL(build_opts(args)) as ydl:
+                if args.list_formats:
+                    info = probe_image(ydl, url)
+                    print(f"Original image format: {info['image_format']}; bytes: {info['size']['bytes']}")
+                    return True
+                print(f"Saved: {download_image(ydl, url, Path(args.output))}")
+            return True
+        except (RequestError, OSError, ValueError) as error:
+            print(f"Image download failed: {error}")
+            return False
     return discover_and_download(url, args, lambda u, referer=None, name=None: attempt(u, args, referer, name))
 
 
 # ───────────────────────── JavaScript runtime and diagnostics ─────────────────────────
+def ffmpeg_location(configured: str | None = None) -> str | None:
+    """Use an explicit absolute path so yt-dlp and Diagnostics inspect the same executable."""
+    location = configured or os.environ.get("GRAB_FFMPEG_LOCATION") or shutil.which("ffmpeg")
+    return str(Path(os.path.expandvars(location)).expanduser().resolve()) if location else None
+
+
+def media_tool_check(program: str, location: str | None = None) -> dict:
+    location = ffmpeg_location(location)
+    if location:
+        path = Path(location)
+        if path.is_dir():
+            path /= program + (".exe" if os.name == "nt" else "")
+        elif program == "ffprobe":
+            path = path.with_name(re.sub("ffmpeg", "ffprobe", path.name, flags=re.IGNORECASE))
+    else:
+        path = None
+    if not path or not path.is_file():
+        return check_item(program, program, "error" if program == "ffmpeg" else "warn",
+                          f"Not found: {path or program}.",
+                          fix="Select the ffmpeg executable or its directory with --ffmpeg-location, then restart the app.")
+    options = {"creationflags": 0x08000000} if os.name == "nt" else {}
+    try:
+        result = subprocess.run([str(path), "-version"], capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=6, **options)
+    except (OSError, subprocess.SubprocessError) as error:
+        detail = ("Windows application control blocked this executable (WinError 4551)."
+                  if getattr(error, "winerror", None) == 4551 else str(error))
+        return check_item(program, program, "error", f"Found at {path}, but cannot be started. {detail}",
+                          fix="Check this executable's permissions and application control policy. A PATH entry alone does not verify it can run.")
+    output = (result.stdout or result.stderr or "").strip()
+    if result.returncode != 0 or not re.search(rf"\b{program} version\b", output, re.IGNORECASE):
+        return check_item(program, program, "error",
+                          f"Found at {path}, but its version check failed (exit {result.returncode}). {output[:300]}",
+                          fix="Check the selected executable and use --ffmpeg-location to select a working installation.")
+    return check_item(program, program, "ok", f"{path}: {output.splitlines()[0][:120]}")
+
+
+@functools.lru_cache(maxsize=16)
+def _ffmpeg_available(location: str | None, interval: int) -> bool:
+    return media_tool_check("ffmpeg", location)["status"] == "ok"
+
+
+def ffmpeg_available() -> bool:
+    # State polling must not launch a new process on every request; changed paths get a new key.
+    return _ffmpeg_available(ffmpeg_location(), int(time.monotonic() // 30))
+
+
 def find_deno() -> str | None:
     """Locate Deno: on PATH first, then next to this Python.
 
@@ -740,17 +852,7 @@ def run_diagnostics(output_dir: str | Path | None = None, net: bool = False) -> 
             fix='pip install -U "yt-dlp[curl-cffi,default]"', action="install_default"))
 
     # ffmpeg / ffprobe
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg:
-        checks.append(check_item("ffmpeg", "ffmpeg", "ok", f"{_first_line_of([ffmpeg, '-version'])[:90]}"))
-    else:
-        checks.append(check_item("ffmpeg", "ffmpeg", "error",
-                                 "Not found. Merging audio/video and MP3 conversion will fail.",
-                                 fix="winget install Gyan.FFmpeg   (Windows, then reopen the terminal)"))
-    if shutil.which("ffprobe"):
-        checks.append(check_item("ffprobe", "ffprobe", "ok", "Found"))
-    else:
-        checks.append(check_item("ffprobe", "ffprobe", "warn", "Not found. It normally ships with ffmpeg; some post-processing needs it."))
+    checks.extend(media_tool_check(program) for program in ("ffmpeg", "ffprobe"))
 
     # JavaScript runtime and yt-dlp-ejs (needed for full YouTube support)
     deno = find_deno()
@@ -863,10 +965,13 @@ def _safe_console() -> None:
 def main() -> None:
     _safe_console()
     args = parse_args()
+    if args.ffmpeg_location:
+        os.environ["GRAB_FFMPEG_LOCATION"] = ffmpeg_location(args.ffmpeg_location)
     if args.doctor:
         sys.exit(doctor_cli(args))
-    if not shutil.which("ffmpeg") and not args.list_formats:
-        sys.exit(FFMPEG_HELP)
+    if args.mode in ("mp4", "mp3", "original") and not ffmpeg_available() and not args.list_formats:
+        status = media_tool_check("ffmpeg")
+        sys.exit(f"{status['detail']}\n{status['fix']}")
 
     urls = collect_urls(args)
     if not urls:

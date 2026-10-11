@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchesFilter, matchesSearch, successStats } from './QueuePanel'
+import { matchesFilter, matchesSearch, orderJobs, successStats } from './QueuePanel'
 import type { Job } from '../../types/api'
 
 const job = (over: Partial<Job>): Job => ({
@@ -19,6 +19,16 @@ const job = (over: Partial<Job>): Job => ({
   finished: 0,
   notes: [],
   ...over,
+})
+
+it('shows running work first and waiting work in its actual execution order', () => {
+  const jobs = [
+    job({ id: 'done' }),
+    job({ id: 'a', status: 'queued' }),
+    job({ id: 'b', status: 'queued' }),
+    job({ id: 'running', status: 'running' }),
+  ]
+  expect(orderJobs(jobs, ['b', 'a']).map((item) => item.id)).toEqual(['running', 'b', 'a', 'done'])
 })
 
 describe('matchesFilter', () => {

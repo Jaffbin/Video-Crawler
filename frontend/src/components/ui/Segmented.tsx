@@ -3,12 +3,13 @@ interface Props<T extends string> {
   value: T
   options: { value: T; label: string }[]
   onChange: (value: T) => void
+  wrap?: boolean
 }
 
 /** A radio group drawn as a segmented control. */
-export function Segmented<T extends string>({ label, value, options, onChange }: Props<T>) {
+export function Segmented<T extends string>({ label, value, options, onChange, wrap = false }: Props<T>) {
   return (
-    <div className="segmented" role="radiogroup" aria-label={label}>
+    <div className={`segmented${wrap ? ' flex-wrap' : ''}`} role="radiogroup" aria-label={label}>
       {options.map((o) => (
         <button
           key={o.value}

@@ -7,6 +7,18 @@ import pytest
 import portable_bootstrap
 
 
+def test_component_only_setup_does_not_install_python_packages(tmp_path, monkeypatch):
+    for name in ("APP_ROOT", "RUNTIME_DIR", "COMPONENTS_DIR", "STATE_FILE"):
+        monkeypatch.setattr(portable_bootstrap, name, getattr(portable_bootstrap, name))
+    seen = []
+    monkeypatch.setattr(portable_bootstrap, "_install_component", lambda name, spec, update: seen.append(name))
+    monkeypatch.setattr(portable_bootstrap, "configure_portable", lambda: pytest.fail("Standalone setup must not change portable Python configuration"))
+    monkeypatch.setattr(portable_bootstrap, "ensure_runtime", lambda *args: pytest.fail("Standalone setup must not install Python packages"))
+    assert portable_bootstrap.main(["--component-root", str(tmp_path), "--components", "ffmpeg"]) == 0
+    assert seen == ["ffmpeg"] and portable_bootstrap.APP_ROOT == tmp_path.resolve()
+    assert portable_bootstrap.STATE_FILE == tmp_path / "runtime" / "components.json"
+
+
 def test_manifest_pins_official_python_and_required_ytdlp_extras():
     manifest = portable_bootstrap.load_manifest()
     assert manifest["python"]["url"].startswith("https://www.python.org/")

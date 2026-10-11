@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadOptions, saveOptions } from './lib/options'
-import { getUpdateStatus, openFolder, startYtdlpUpdate } from './api/client'
+import {
+  getSetupStatus,
+  getUpdateStatus,
+  openFolder,
+  prepareSetup,
+  selectDownloadFolder,
+  startYtdlpUpdate,
+} from './api/client'
 import { Banners } from './components/layout/Banners'
 import { Header, type NotificationMode } from './components/layout/Header'
 import { Sidebar } from './components/layout/Sidebar'
@@ -59,6 +66,7 @@ export default function App() {
   const setupConsidered = useRef(false)
   const [updateOpen, setUpdateOpen] = useState(false)
   const [installBusy, setInstallBusy] = useState(false)
+  const [changingFolder, setChangingFolder] = useState(false)
   const [ytdlpCheck, setYtdlpCheck] = useState<YtdlpCheck | null>(null)
   const { view, navigate } = useNavigation()
 
@@ -98,6 +106,7 @@ export default function App() {
       // for when the user opens *that* dialog instead, so this just waits quietly.
       for (;;) {
         const s = await getUpdateStatus()
+        if (s.status === 'error') throw new Error(s.error || 'Install failed')
         if (s.status !== 'running') break
         await new Promise((r) => setTimeout(r, 900))
       }
@@ -107,6 +116,40 @@ export default function App() {
       toast(e instanceof Error ? e.message : t('Install failed'), true)
     } finally {
       setInstallBusy(false)
+    }
+  }
+
+  async function prepare() {
+    setInstallBusy(true)
+    try {
+      await prepareSetup()
+      for (;;) {
+        const status = await getUpdateStatus()
+        if (status.status === 'error')
+          throw new Error('Preparation failed. Check your connection or open technical details.')
+        if (status.status !== 'running') break
+        await new Promise((resolve) => setTimeout(resolve, 900))
+      }
+      const status = await getSetupStatus()
+      await environment.refresh()
+      await refresh()
+      if (status.restart_required) await restartService()
+      else if (!status.ready)
+        throw new Error('Some download features still need attention. Open technical details for help.')
+    } finally {
+      setInstallBusy(false)
+    }
+  }
+
+  async function changeFolder() {
+    setChangingFolder(true)
+    try {
+      const result = await selectDownloadFolder()
+      if (!result.canceled && result.restart_required) await restartService()
+    } catch (e) {
+      toast(t(e instanceof Error ? e.message : 'Could not change the save folder. Please try again.'), true)
+    } finally {
+      setChangingFolder(false)
     }
   }
 
@@ -160,6 +203,7 @@ export default function App() {
         onNotify={requestNotify}
       />
       <Banners
+        onOpenSetup={() => setSetupOpen(true)}
         online={online}
         ffmpeg={state.ffmpeg}
         showYoutubeIssues={environment.showBanner}
@@ -169,18 +213,32 @@ export default function App() {
 
       <main className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6">
         {view === 'new' && (
-          <div className="max-w-3xl">
-            <NewDownloadPanel
-              options={options}
-              onOptionsChange={patchOptions}
-              playwright={state.playwright}
-              onToast={toast}
-              onAdded={refresh}
-            />
-          </div>
+          <NewDownloadPanel
+            root={state.root}
+            onChooseFolder={changeFolder}
+            changingFolder={changingFolder}
+            folderChangeBlocked={activeJobs > 0 || installBusy}
+            options={options}
+            onOptionsChange={patchOptions}
+            playwright={state.playwright}
+            onToast={toast}
+            onAdded={() => {
+              void refresh()
+              navigate('queue')
+            }}
+          />
         )}
         {view === 'queue' && (
-          <QueuePanel jobs={jobs} windowMode={!!state.window} onChanged={refresh} onToast={toast} />
+          <QueuePanel
+            jobs={jobs}
+            queuePaused={state.queue_paused}
+            queueOrder={state.queue_order}
+            onNewDownload={() => navigate('new')}
+            windowMode={!!state.window}
+            onChanged={refresh}
+            onToast={toast}
+            onHelp={() => setSetupOpen(true)}
+          />
         )}
         {view === 'auto-download' && (
           <SubscriptionsPanel
@@ -194,6 +252,10 @@ export default function App() {
         {view === 'library' && (
           <FileGallery
             files={state.files ?? []}
+            scan={state.library_scan}
+            collections={state.collections ?? []}
+            onNewDownload={() => navigate('new')}
+            editingBlocked={jobs.some((job) => job.status === 'running')}
             windowMode={!!state.window}
             onRefresh={refreshFiles}
             onToast={toast}
@@ -218,7 +280,10 @@ export default function App() {
           closeSetup()
           setDoctorOpen(true)
         }}
-        onStart={() => {
+        preparing={installBusy}
+        onPrepare={prepare}
+        onStart={(imagesOnly) => {
+          if (imagesOnly) patchOptions({ mode: 'image' })
           closeSetup()
           navigate('new')
         }}

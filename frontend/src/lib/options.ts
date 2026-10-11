@@ -3,6 +3,15 @@ import type { DownloadOptions } from '../types/api'
 export const STORAGE_KEY = 'grab-options'
 export const QUALITIES = [2160, 1440, 1080, 720, 480, 360]
 export const BITRATES = [320, 256, 192, 128, 96]
+export function audioQualityLabel(bitrate: number): string {
+  return bitrate === 320
+    ? 'Highest quality'
+    : bitrate === 192
+      ? 'Standard quality (recommended)'
+      : bitrate === 128
+        ? 'Save space'
+        : 'Custom bitrate'
+}
 export const BROWSERS = ['chrome', 'edge', 'firefox', 'brave', 'chromium', 'opera', 'vivaldi', 'safari']
 
 export const DEFAULT_OPTIONS: DownloadOptions = {
@@ -44,7 +53,7 @@ export function sanitizeOptions(input: Partial<DownloadOptions>): DownloadOption
   const abr = Number(o.abr)
   return {
     ...o,
-    mode: o.mode === 'mp3' ? 'mp3' : 'mp4',
+    mode: ['mp4', 'mp3', 'original', 'cover', 'image'].includes(o.mode) ? o.mode : 'mp4',
     quality: quality === 'best' || /^\d+$/.test(quality) ? quality : 'best',
     abr: BITRATES.includes(abr) ? abr : DEFAULT_OPTIONS.abr,
     threads: Math.round(clamp(o.threads, 1, 16, DEFAULT_OPTIONS.threads)),
@@ -77,6 +86,9 @@ export function describeOptions(
   options: Pick<DownloadOptions, 'mode' | 'quality' | 'abr' | 'subs' | 'cover'>,
 ): string {
   const parts: string[] = []
+  if (options.mode === 'cover') return 'Video cover · original format'
+  if (options.mode === 'image') return 'Direct image · original format'
+  if (options.mode === 'original') return 'Source audio · best available · no re-encoding'
   if (options.mode === 'mp3') {
     parts.push('MP3', `${options.abr} kbps`)
   } else {

@@ -37,6 +37,10 @@ ones so the prebuilt interface remains usable without Node.js.
 ## Design boundaries
 
 - `grab.py` owns download discovery and yt-dlp options.
+- `grab_download.py` records structured yt-dlp item failures for selective retries.
+- `grab_images.py` uses yt-dlp's request client for bounded original-format image downloads and
+  cover-only extraction. Temporary files are hidden and published atomically after completion.
+- `grab_library.py` owns local media metadata and reversible group operations for companion files.
 - `grab_sites.py` contains narrow site adapters; keep them independent and fixture-tested.
 - `grab_models.py` contains persisted state models and API views.
 - `grab_state.py` owns thread-safe in-memory registries.

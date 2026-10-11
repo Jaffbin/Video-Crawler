@@ -251,11 +251,29 @@ def ensure_runtime(with_playwright: bool = False, update: bool = False) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global APP_ROOT, RUNTIME_DIR, COMPONENTS_DIR, STATE_FILE
     parser = argparse.ArgumentParser(description="Install or update Video Grabber portable components")
     parser.add_argument("--with-playwright", action="store_true", help="also install optional Playwright page rendering")
     parser.add_argument("--update", action="store_true", help="check for and install newer components")
+    parser.add_argument("--component-root", type=Path, help="install standalone tools in this app-managed folder")
+    parser.add_argument("--manifest", type=Path, default=MANIFEST_FILE)
+    parser.add_argument("--components", help="install only the selected standalone tools")
     args = parser.parse_args(argv)
     try:
+        if args.components:
+            names = args.components.split(",")
+            if os.name != "nt" or sys.maxsize <= 2**32 or any(name not in ("ffmpeg", "deno") for name in names):
+                raise BootstrapError("Automatic tool installation requires 64-bit Windows")
+            if args.component_root:
+                APP_ROOT = args.component_root.resolve()
+                RUNTIME_DIR = APP_ROOT / "runtime"
+                COMPONENTS_DIR = RUNTIME_DIR / "components"
+                STATE_FILE = RUNTIME_DIR / "components.json"
+            manifest = load_manifest(args.manifest)
+            for name in names:
+                _install_component(name, manifest["components"][name], args.update)
+            print("Media components are ready.")
+            return 0
         configure_portable()
         ensure_runtime(args.with_playwright, args.update)
     except BootstrapError as exc:

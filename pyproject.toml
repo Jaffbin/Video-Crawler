@@ -18,7 +18,7 @@ render = ["playwright"]
 dev = ["pytest>=8,<10", "ruff>=0.14,<1"]
 
 [tool.setuptools]
-py-modules = ["grab", "grab_config", "grab_models", "grab_sites", "grab_state", "grab_storage", "webui"]
+py-modules = ["grab", "grab_config", "grab_download", "grab_images", "grab_library", "grab_repair", "grab_models", "grab_sites", "grab_state", "grab_storage", "webui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

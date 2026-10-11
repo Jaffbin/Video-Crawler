@@ -25,9 +25,15 @@ export function AddSubscriptionForm({ options, onAdded, onToast }: Props) {
   const [busy, setBusy] = useState(false)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const submitting = useRef(false)
+  const pictureMode = options.mode === 'cover' || options.mode === 'image'
 
   async function submit() {
     if (submitting.current) return
+    if (pictureMode)
+      return onToast(
+        t('Subscriptions support video and audio. Choose MP4 or MP3 in New download first.'),
+        true,
+      )
     const trimmed = url.trim()
     if (!trimmed) return onToast(t('Paste a channel or playlist link first'), true)
     submitting.current = true
@@ -58,11 +64,16 @@ export function AddSubscriptionForm({ options, onAdded, onToast }: Props) {
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void submit()}
         />
-        <Button variant="primary" onClick={submit} disabled={busy}>
+        <Button variant="primary" onClick={submit} disabled={busy || pictureMode}>
           {busy ? <Loader2 aria-hidden size={16} className="animate-spin" /> : <Plus aria-hidden size={16} />}
           {t('Add')}
         </Button>
       </div>
+      {pictureMode && (
+        <p className="text-xs text-amber-200">
+          {t('Subscriptions support video and audio. Choose MP4 or MP3 in New download first.')}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
         <span>{t('When first added, download:')}</span>
         <Segmented

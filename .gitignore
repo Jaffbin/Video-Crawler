@@ -9,6 +9,8 @@ downloads/
 *.ytdl
 .grab-history.json
 .grab-subscriptions.json
+.grab-library.json
+.grab-trash/
 .archive.txt
 cookies.txt
 

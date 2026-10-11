@@ -12,6 +12,7 @@ import type {
   StateResponse,
   UpdateStatus,
   YtdlpCheck,
+  RecoveryFile,
 } from '../types/api'
 import { sanitizeOptions } from '../lib/options'
 
@@ -66,20 +67,68 @@ export const getState = (rev: number) => api<StateResponse>(`/api/state?rev=${re
 export const probe = (url: string, options: DownloadOptions) =>
   post<ProbeResult>('/api/probe', { url, options: sanitizeOptions(options) })
 export const createJobs = (urls: string[], options: DownloadOptions) =>
-  post<{ ids: string[] }>('/api/jobs', { urls, options: sanitizeOptions(options) })
+  post<{ ids: string[]; duplicates?: number }>('/api/jobs', { urls, options: sanitizeOptions(options) })
 export const jobAction = (id: string, action: 'cancel' | 'retry' | 'remove') =>
-  post<{ ok?: boolean; ids?: string[] }>(`/api/jobs/${id}/${action}`)
+  post<{ ok?: boolean; ids?: string[]; duplicates?: boolean }>(`/api/jobs/${id}/${action}`)
 export const clearJobs = () => post<{ ok: boolean }>('/api/clear')
+export const batchJobs = (ids: string[], action: 'cancel' | 'retry' | 'remove') =>
+  post<{ processed: string[]; skipped: string[] }>('/api/jobs/batch', { ids, action })
+export const pauseQueue = (paused: boolean) => post<{ paused: boolean }>('/api/queue', { paused })
+export const moveJob = (id: string, direction: 'up' | 'down') =>
+  post<{ ok: boolean }>(`/api/jobs/${id}/move-${direction}`)
+export const renameFile = (path: string, name: string) =>
+  post<{ path: string }>('/api/library/rename', { path, name })
+export const trashFile = (path: string) => post<{ id: string }>('/api/library/trash', { path })
+export const organizeFiles = (
+  items: string[],
+  patch: { favorite?: boolean; collection_id?: string; remove?: boolean },
+) =>
+  post<{ processed: string[]; failed: Array<{ item: string; error: string }> }>('/api/library/organize', {
+    items,
+    ...patch,
+  })
+export const changeCollection = (action: 'create' | 'rename' | 'delete', name?: string, id?: string) =>
+  post<{ id: string }>('/api/library/collections', { action, name, id })
+export const getRecoveryFiles = () => api<{ items: RecoveryFile[] }>('/api/library/trash')
+export const restoreFile = (id: string) => post<{ path: string }>('/api/library/restore', { id })
+export const purgeFile = (id: string) => post<{ ok: boolean }>('/api/library/purge', { id })
+export const batchLibrary = (items: string[], action: 'trash' | 'restore' | 'purge') =>
+  post<{ processed: string[]; failed: Array<{ item: string; error: string }>; recovery_ids?: string[] }>(
+    '/api/library/batch',
+    {
+      items,
+      action,
+    },
+  )
+export const repairFile = (path: string) =>
+  post<{ ids: string[]; duplicates: boolean }>('/api/library/repair', { path })
 export const getLog = (id: string) => api<{ lines: string[] }>(`/api/jobs/${id}/log`)
 /** Show a file (selected, where the OS supports it) or the download folder. */
 export const openFolder = (path?: string) => post<{ ok: boolean }>('/api/open-folder', { path })
+export const selectDownloadFolder = () =>
+  post<{ canceled: boolean; restart_required: boolean; root: string }>('/api/download-folder/select')
 /** Open a file with the operating system's default app. */
 export const openFile = (path: string) => post<{ ok: boolean }>('/api/open-file', { path })
+export const openExternalUrl = async (url: string) => {
+  const result = await post<{ ok: boolean }>('/api/open-url', { url })
+  if (!result.ok) throw new Error('Could not open it')
+}
 export const getCookies = () => api<CookieStatus>('/api/cookies')
 export const uploadCookies = (text: string) => post<CookieStatus>('/api/cookies', { text })
 export const deleteCookies = () => post<CookieStatus>('/api/cookies/delete')
 export const getDoctor = (net = false, force = true) =>
   api<DoctorResult>(`/api/doctor?${net ? 'net=1&' : ''}${force ? 'force=1' : ''}`)
+export const getSetupStatus = () =>
+  api<{
+    ready: boolean
+    blocked: boolean
+    can_install: boolean
+    restart_required: boolean
+    issues: string[]
+  }>('/api/setup')
+export const prepareSetup = () => post<{ ok: boolean }>('/api/setup')
+export const retryWithBrowser = (id: string, browser: string) =>
+  post<{ ids: string[]; duplicates: boolean }>(`/api/jobs/${id}/retry-browser`, { browser })
 export const checkYtdlp = (force = false) => api<YtdlpCheck>(`/api/ytdlp/check${force ? '?force=1' : ''}`)
 export const startYtdlpUpdate = (extras: ComponentExtras = 'default') =>
   post<{ ok: boolean }>('/api/ytdlp/update', { extras })

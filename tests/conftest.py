@@ -1,7 +1,7 @@
 """Shared fixtures. Run from the project folder with:  pip install pytest  &&  pytest -q"""
 import functools
 import http.server
-import shutil
+import os
 import socket
 import subprocess
 import sys
@@ -12,7 +12,27 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-HAVE_FFMPEG = shutil.which("ffmpeg") is not None
+import grab  # noqa: E402
+from yt_dlp.postprocessor.ffmpeg import FFmpegPostProcessor  # noqa: E402
+
+FFMPEG_LOCATION = grab.ffmpeg_location()
+FFMPEG_EXE = Path(FFMPEG_LOCATION) if FFMPEG_LOCATION else None
+if FFMPEG_EXE and FFMPEG_EXE.is_dir():
+    FFMPEG_EXE /= "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+HAVE_FFMPEG = bool(FFMPEG_EXE and FFMPEG_EXE.is_file())
+
+
+@pytest.fixture(autouse=True)
+def isolated_media_detection(monkeypatch):
+    """Keep mocked tool versions and personal settings out of subsequent tests."""
+    monkeypatch.delenv("GRAB_FFMPEG_LOCATION", raising=False)
+    if HAVE_FFMPEG:
+        monkeypatch.setenv("PATH", str(FFMPEG_EXE.parent) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setattr(FFmpegPostProcessor, "_version_cache", {None: None})
+    monkeypatch.setattr(FFmpegPostProcessor, "_features_cache", {})
+    grab._ffmpeg_available.cache_clear()
+    yield
+    grab._ffmpeg_available.cache_clear()
 
 
 @pytest.fixture(scope="session")
@@ -22,7 +42,7 @@ def media_site(tmp_path_factory):
         pytest.skip("ffmpeg is not installed")
     root = tmp_path_factory.mktemp("site")
     subprocess.run(
-        ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=25", "-f", "lavfi",
+        [str(FFMPEG_EXE), "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=25", "-f", "lavfi",
          "-i", "sine=frequency=440", "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
          "-shortest", str(root / "clip.mp4")], check=True)
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))

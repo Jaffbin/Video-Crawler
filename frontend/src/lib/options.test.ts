@@ -9,6 +9,18 @@ import {
 } from './options'
 
 describe('sanitizeOptions', () => {
+  it('preserves source audio mode across saved settings', () => {
+    saveOptions({ ...DEFAULT_OPTIONS, mode: 'original' })
+    expect(loadOptions().mode).toBe('original')
+    expect(describeOptions({ ...DEFAULT_OPTIONS, mode: 'original' })).toBe(
+      'Source audio · best available · no re-encoding',
+    )
+  })
+  it('preserves independent image modes', () => {
+    expect(sanitizeOptions({ mode: 'cover' }).mode).toBe('cover')
+    expect(sanitizeOptions({ mode: 'image' }).mode).toBe('image')
+    expect(describeOptions({ ...DEFAULT_OPTIONS, mode: 'cover' })).toBe('Video cover · original format')
+  })
   it('never lets an unknown bitrate reach the backend as NaN', () => {
     // This was a real bug in the ChatGPT-generated UI: its <select> had no `value`, so this reached the backend as NaN.
     expect(sanitizeOptions({ abr: NaN }).abr).toBe(DEFAULT_OPTIONS.abr)

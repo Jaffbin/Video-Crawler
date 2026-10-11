@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,16 +15,19 @@ class WebConfig:
     workers: int
     ui: str
     subscription_interval_seconds: int
+    ffmpeg_location: str | None = None
+    download_dir_explicit: bool = False
 
 
 def parse_web_config(argv=None) -> WebConfig:
     parser = argparse.ArgumentParser(description="Local Web UI for grab.py")
-    parser.add_argument("--dir", default="downloads", help="Download directory (default: ./downloads)")
+    parser.add_argument("--dir", help="Download directory (overrides the saved folder)")
     parser.add_argument(
         "--port", type=int, default=8765,
         help="Starting port, will auto-increment if occupied (default: 8765)",
     )
     parser.add_argument("--workers", type=int, default=2, help="Concurrent download task count (default: 2)")
+    parser.add_argument("--ffmpeg-location", help="ffmpeg executable or directory (also GRAB_FFMPEG_LOCATION)")
     parser.add_argument(
         "--ui", choices=("window", "browser", "none"), default="window",
         help=("window: a native app window (needs pywebview, the default); "
@@ -38,10 +42,11 @@ def parse_web_config(argv=None) -> WebConfig:
     )
     args = parser.parse_args(argv)
     return WebConfig(
-        download_dir=Path(args.dir).expanduser().resolve(),
+        download_dir=Path(args.dir or os.environ.get("GRAB_DEFAULT_DOWNLOAD_DIR") or "downloads").expanduser().resolve(),
         port=args.port,
         workers=max(1, min(args.workers, 6)),
         ui=args.ui,
         subscription_interval_seconds=max(300, args.sub_interval * 60),
+        ffmpeg_location=args.ffmpeg_location,
+        download_dir_explicit=args.dir is not None,
     )
-

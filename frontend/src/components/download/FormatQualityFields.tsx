@@ -1,4 +1,4 @@
-import { BITRATES } from '../../lib/options'
+import { audioQualityLabel } from '../../lib/options'
 import type { DownloadOptions } from '../../types/api'
 import { Segmented } from '../ui/Segmented'
 import { useI18n } from '../../i18n'
@@ -15,6 +15,7 @@ interface Props {
   analyzed?: boolean
   /** Show the "Analyze the link..." hint. Only "New download" can analyze, so the subscription editor leaves it off. */
   showAnalyzeHint?: boolean
+  allowImages?: boolean
 }
 
 const FALLBACK_HEIGHTS = [2160, 1440, 1080, 720, 480, 360]
@@ -26,6 +27,7 @@ export function FormatQualityFields({
   availableHeights = [],
   analyzed = false,
   showAnalyzeHint = false,
+  allowImages = false,
 }: Props) {
   const { t } = useI18n()
   const mp3 = options.mode === 'mp3'
@@ -36,33 +38,79 @@ export function FormatQualityFields({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      <div className="control">
+      <div className="control sm:col-span-2">
         <span>{t('Format')}</span>
         <Segmented
+          wrap
           label={t('Output format')}
           value={options.mode}
           onChange={(mode) => onChange({ mode })}
           options={[
             { value: 'mp4', label: t('MP4 video') },
             { value: 'mp3', label: t('MP3 audio') },
+            { value: 'original', label: t('Keep source audio') },
+            ...(allowImages
+              ? [
+                  { value: 'cover' as const, label: t('Video cover') },
+                  { value: 'image' as const, label: t('Direct image') },
+                ]
+              : []),
           ]}
         />
       </div>
-      {mp3 ? (
-        <label className="control">
-          <span>{t('Output bitrate')}</span>
-          <select
-            className="field"
-            value={options.abr}
-            onChange={(e) => onChange({ abr: Number(e.target.value) })}
-          >
-            {BITRATES.map((b) => (
-              <option key={b} value={b}>
-                {b} kbps
-              </option>
-            ))}
-          </select>
-        </label>
+      {options.mode === 'cover' || options.mode === 'image' ? (
+        <p className="self-center text-xs text-zinc-400">
+          {t('Save the original image format. No ffmpeg conversion is needed.')}
+        </p>
+      ) : options.mode === 'original' ? (
+        <div className="grid gap-1 text-xs text-zinc-400 sm:col-span-2">
+          <p className="text-sm text-zinc-200">{t('Best available audio · no re-encoding')}</p>
+          <p>
+            {t(
+              'The source determines the format, such as M4A or Opus. Some older players may not support it.',
+            )}
+          </p>
+          <p>{t('This preserves the audio offered by the site, not necessarily the original recording.')}</p>
+        </div>
+      ) : mp3 ? (
+        <div className="grid gap-2 sm:col-span-2">
+          <label className="control">
+            <span>{t('Audio quality')}</span>
+            <select
+              className="field"
+              value={options.abr}
+              onChange={(e) => onChange({ abr: Number(e.target.value) })}
+            >
+              {[320, 192, 128, ...(![320, 192, 128].includes(options.abr) ? [options.abr] : [])].map((b) => (
+                <option key={b} value={b}>
+                  {t(audioQualityLabel(b))} · {b} kbps
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-xs text-zinc-400">
+            {t(
+              'The best available source audio is used. A higher MP3 bitrate cannot restore details missing from the source.',
+            )}
+          </p>
+          <details className="text-xs text-zinc-400">
+            <summary className="cursor-pointer">{t('Custom bitrate')}</summary>
+            <label className="control mt-2">
+              <span>{t('Output bitrate')}</span>
+              <select
+                className="field"
+                value={options.abr}
+                onChange={(e) => onChange({ abr: Number(e.target.value) })}
+              >
+                {[320, 256, 192, 128, 96].map((b) => (
+                  <option key={b} value={b}>
+                    {b} kbps
+                  </option>
+                ))}
+              </select>
+            </label>
+          </details>
+        </div>
       ) : (
         <label className="control">
           <span>{t('Maximum video quality')}</span>

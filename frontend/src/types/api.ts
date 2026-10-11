@@ -1,5 +1,5 @@
 export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'canceled'
-export type DownloadMode = 'mp4' | 'mp3'
+export type DownloadMode = 'mp4' | 'mp3' | 'original' | 'cover' | 'image'
 
 export interface DownloadOptions {
   mode: DownloadMode
@@ -29,6 +29,7 @@ export interface DownloadOptions {
 export interface JobFile {
   name: string
   path: string
+  complete?: boolean
 }
 
 export interface Job {
@@ -49,6 +50,8 @@ export interface Job {
   created: number
   finished: number
   notes: string[]
+  failed_items?: Array<{ index: number | null; url: string; title: string; error: string }>
+  retry_failed_only?: boolean
 }
 
 export interface FileItem {
@@ -56,10 +59,41 @@ export interface FileItem {
   path: string
   size: number
   mtime: number
+  downloaded?: number
+  source?: string
+  source_url?: string
+  title?: string
+  kind?: 'video' | 'audio' | 'image'
+  complete?: boolean
+  can_repair?: boolean
+  favorite?: boolean
+  collections?: string[]
+}
+
+export interface LibraryCollection {
+  id: string
+  name: string
+}
+
+export interface RecoveryFile {
+  id: string
+  path: string
+  removed: number
+  size?: number
+}
+
+export interface LibraryScan {
+  checked: number
+  media_count: number
+  entry_limit: number
+  max_depth: number
+  incomplete: boolean
+  reasons: Array<'entry_limit' | 'depth_limit' | 'unreadable'>
 }
 
 export interface ProbeResult {
-  kind?: 'video' | 'playlist' | 'page'
+  kind?: 'video' | 'playlist' | 'page' | 'cover' | 'image'
+  image_format?: string
   title?: string
   uploader?: string
   duration?: number
@@ -68,6 +102,9 @@ export interface ProbeResult {
   extractor?: string
   count?: number
   items?: string[]
+  playlist_entries?: Array<{ index: number; title: string; duration?: number | null }>
+  size?: { bytes: number | null; approximate: boolean }
+  selection?: { mode: DownloadMode; quality: string; abr: number }
   sources?: string[]
   rendered?: boolean
   error?: string
@@ -80,7 +117,11 @@ export interface StateResponse {
   root: string
   rev: number
   jobs: Job[]
+  queue_paused?: boolean
+  queue_order?: string[]
   files?: FileItem[]
+  library_scan?: LibraryScan
+  collections?: LibraryCollection[]
   /** The backend shows native desktop notifications itself (window mode). */
   desktop_notifications?: boolean
   /** The UI runs inside the desktop window rather than a browser tab. */

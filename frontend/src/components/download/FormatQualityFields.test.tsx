@@ -53,6 +53,7 @@ describe('FormatQualityFields', () => {
   it('switches to a bitrate picker for MP3', () => {
     render(<FormatQualityFields options={{ ...video, mode: 'mp3' }} onChange={() => {}} />)
     expect(screen.queryByLabelText(/maximum video quality/i)).toBeNull()
+    expect(optionValues(screen.getByLabelText(/audio quality/i))).toEqual(['320', '192', '128'])
     expect(optionValues(screen.getByLabelText(/output bitrate/i))).toEqual(['320', '256', '192', '128', '96'])
   })
 
