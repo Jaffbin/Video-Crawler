@@ -13,12 +13,39 @@ afterEach(() => {
   restart.mockClear()
 })
 
+it('returns to the guide after a preparation restart and focuses the first link field', async () => {
+  localStorage.setItem('grab-setup-seen', '1')
+  localStorage.setItem('grab-setup-pending', '1')
+  window.location.hash = '#/library'
+  document.head.insertAdjacentHTML('beforeend', '<meta name="grab-token" content="test-token">')
+  resetTokenCache()
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      let body: unknown = { ok: true }
+      if (url.startsWith('/api/state'))
+        body = { version: '1', ffmpeg: true, root: '/downloads', rev: 0, jobs: [], files: [], window: false }
+      else if (url.startsWith('/api/doctor')) body = { checks: [], report: '', net: false }
+      else if (url.startsWith('/api/subscriptions')) body = { subscriptions: [], interval_seconds: 3600 }
+      else if (url === '/api/setup') body = { ready: true, can_install: true }
+      return new Response(JSON.stringify(body))
+    }),
+  )
+  render(<App />)
+  const guide = await screen.findByRole('dialog', { name: 'Welcome to Video Grabber' })
+  await userEvent.click(within(guide).getByRole('button', { name: 'Start downloading' }))
+  const field = await screen.findByRole('textbox', { name: /links to download/i })
+  await waitFor(() => expect(field).toHaveFocus())
+  expect(localStorage.getItem('grab-setup-pending')).toBeNull()
+})
+
 it.each(['changed', 'canceled', 'failed'])(
   'changes the save folder and restarts only when needed (%s)',
   async (outcome) => {
     localStorage.clear()
     localStorage.setItem('grab-setup-seen', '1')
-    window.location.hash = ''
+    window.location.hash = '#/new'
     document.head.insertAdjacentHTML('beforeend', '<meta name="grab-token" content="test-token">')
     resetTokenCache()
     const calls: string[] = []
@@ -115,7 +142,7 @@ it.each([false, true])(
     render(<App />)
     const guide = await screen.findByRole('dialog', { name: 'Welcome to Video Grabber' })
     expect(prepared).toBe(false)
-    await user.click(within(guide).getByRole('button', { name: 'Prepare download features' }))
+    await user.click(await within(guide).findByRole('button', { name: 'Prepare download features' }))
     if (failure) {
       expect(await screen.findByRole('alert')).toHaveTextContent('Preparation failed')
       expect(restart).not.toHaveBeenCalled()

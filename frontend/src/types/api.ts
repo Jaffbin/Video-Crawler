@@ -68,11 +68,30 @@ export interface FileItem {
   can_repair?: boolean
   favorite?: boolean
   collections?: string[]
+  tags?: string[]
+  note?: string
+  thumbnail?: string
+  playback?: { position: number; duration: number; finished: boolean; updated: number } | null
 }
 
 export interface LibraryCollection {
   id: string
   name: string
+}
+
+export interface SmartRules {
+  kind?: 'video' | 'audio' | 'image'
+  source?: string
+  format?: string
+  tag?: string
+  favorite?: boolean
+  recent_days?: number
+  playback?: 'unplayed' | 'in_progress' | 'finished'
+}
+
+export interface SmartCollection extends LibraryCollection {
+  rules: SmartRules
+  builtin?: boolean
 }
 
 export interface RecoveryFile {
@@ -89,6 +108,39 @@ export interface LibraryScan {
   max_depth: number
   incomplete: boolean
   reasons: Array<'entry_limit' | 'depth_limit' | 'unreadable'>
+}
+
+export interface LibraryCheck {
+  id: string
+  root: string
+  status: 'idle' | 'running' | 'cancelling' | 'cancelled' | 'done' | 'error'
+  phase: 'inventory' | 'hashing' | 'verifying'
+  checked: number
+  total: number
+  bytes_read: number
+  error: string
+  result: {
+    media: { count: number; bytes: number }
+    attachments: { count: number; bytes: number }
+    recovery: { count: number; bytes: number }
+    duplicate_bytes: number
+    duplicates: Array<{
+      id: string
+      size: number
+      files: Array<{ path: string; name: string; favorite: boolean }>
+    }>
+    missing: Array<{ path: string; title: string }>
+    unknown: Array<{ path: string; reason: string }>
+    incomplete: boolean
+    reasons: string[]
+    finished: number
+  } | null
+}
+
+export interface LibraryBatchResult {
+  processed: string[]
+  failed: Array<{ item: string; error: string }>
+  recovery_ids: string[]
 }
 
 export interface ProbeResult {
@@ -122,8 +174,11 @@ export interface StateResponse {
   files?: FileItem[]
   library_scan?: LibraryScan
   collections?: LibraryCollection[]
+  smart_collections?: SmartCollection[]
   /** The backend shows native desktop notifications itself (window mode). */
   desktop_notifications?: boolean
+  /** Windows completion delivery runs independently of WebView polling. */
+  native_notifications?: { enabled: boolean; available: boolean }
   /** The UI runs inside the desktop window rather than a browser tab. */
   window?: boolean
 }
@@ -166,6 +221,7 @@ export interface YtdlpCheck {
 }
 
 export interface UpdateStatus {
+  setup_stage?: 'checking' | 'media' | 'sites' | 'verifying' | 'ready'
   status: 'idle' | 'running' | 'done' | 'error'
   lines: string[]
   before: string

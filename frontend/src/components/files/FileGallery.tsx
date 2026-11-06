@@ -1,18 +1,21 @@
 import {
+  Ellipsis,
+  Download,
   ExternalLink,
-  Film,
   FolderOpen,
   Image as ImageIcon,
-  Music,
   Pencil,
   Play,
   RefreshCw,
   Search,
+  SlidersHorizontal,
+  LayoutGrid,
+  List,
   Star,
   ListPlus,
   Trash2,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState, type SetStateAction } from 'react'
 import {
   batchLibrary,
   repairFile,
@@ -28,13 +31,23 @@ import {
   organizeFiles,
 } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
-import { formatBytes, formatDate } from '../../lib/utils'
-import type { FileItem, RecoveryFile, LibraryScan, LibraryCollection } from '../../types/api'
+import { formatBytes, formatDate, formatDuration } from '../../lib/utils'
+import type { FileItem, RecoveryFile, LibraryScan, LibraryCollection, SmartCollection } from '../../types/api'
+import { BUILTIN_SMART_COLLECTIONS, matchesSmartCollection, smartName } from '../../lib/smartCollections'
 import { CollectionManager } from './CollectionManager'
+import { ImportFiles } from './ImportFiles'
+import { MediaArtwork } from './MediaArtwork'
+import { MediaDetails } from './MediaDetails'
+import { LibraryFilters } from './LibraryFilters'
+import { LibraryOrganizer } from './LibraryOrganizer'
 import { displayFilename, fileKind, filterLibrary, type LibrarySort } from '../../lib/library'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
+import { Popover } from '../ui/Popover'
+import { SelectionScope } from '../ui/SelectionScope'
+import { browseKey, loadBrowse, DEFAULT_BROWSE } from '../../lib/libraryBrowse'
 import { useI18n } from '../../i18n'
+import { AUDIO_QUEUE_LIMIT, playableAudio, type AudioPlayerController } from '../../lib/audioPlayer'
 
 function ImageThumbnail({ file, onPreview }: { file: FileItem; onPreview: () => void }) {
   const { t } = useI18n()
@@ -62,6 +75,8 @@ function ImageThumbnail({ file, onPreview }: { file: FileItem; onPreview: () => 
 }
 
 interface Props {
+  audioPlayer?: AudioPlayerController
+  root?: string
   files: FileItem[]
   windowMode: boolean
   onRefresh: () => void
@@ -70,9 +85,12 @@ interface Props {
   onNewDownload?: () => void
   scan?: LibraryScan
   collections?: LibraryCollection[]
+  smartCollections?: SmartCollection[]
 }
 
 export function FileGallery({
+  audioPlayer,
+  root = '',
   files,
   windowMode,
   onRefresh,
@@ -81,21 +99,78 @@ export function FileGallery({
   onNewDownload,
   scan,
   collections = [],
+  smartCollections = [],
 }: Props) {
   const { t } = useI18n()
   const [selected, setSelected] = useState<string[]>([])
   const [recoverySelected, setRecoverySelected] = useState<string[]>([])
+  const selectedKeys = useMemo(() => new Set(selected), [selected])
+  const recoveryKeys = useMemo(() => new Set(recoverySelected), [recoverySelected])
   const [batchAction, setBatchAction] = useState<'trash' | 'purge' | null>(null)
-  const [query, setQuery] = useState('')
-  const [source, setSource] = useState('')
-  const [format, setFormat] = useState('')
-  const [kind, setKind] = useState('')
-  const [favoritesOnly, setFavoritesOnly] = useState(false)
-  const [collectionFilter, setCollectionFilter] = useState('')
+  const [browse, setBrowse] = useState(() => loadBrowse(root))
+  const {
+    query,
+    source,
+    format,
+    kind,
+    favoritesOnly,
+    collectionFilter,
+    smartFilter,
+    continuing,
+    sort,
+    page,
+    pageSize,
+  } = browse
+  const smartChoices = useMemo(() => [...BUILTIN_SMART_COLLECTIONS, ...smartCollections], [smartCollections])
+  const activeSmart = smartChoices.find((item) => item.id === smartFilter)
+  const [smartNow, setSmartNow] = useState(() => Date.now() / 1000)
+  useEffect(() => {
+    setSmartNow(Date.now() / 1000)
+    if (!activeSmart?.rules.recent_days) return
+    const timer = window.setInterval(() => setSmartNow(Date.now() / 1000), 60000)
+    return () => window.clearInterval(timer)
+  }, [smartFilter, activeSmart?.rules.recent_days])
+  const setQuery = (query: string) => setBrowse((value) => ({ ...value, query }))
+  const setSource = (source: string) => setBrowse((value) => ({ ...value, source }))
+  const setFormat = (format: string) => setBrowse((value) => ({ ...value, format }))
+  const setKind = (kind: string) => setBrowse((value) => ({ ...value, kind }))
+  const setFavoritesOnly = (favoritesOnly: boolean) => setBrowse((value) => ({ ...value, favoritesOnly }))
+  const setCollectionFilter = (collectionFilter: string) =>
+    setBrowse((value) => ({ ...value, collectionFilter }))
+  const setSmartFilter = (smartFilter: string) => setBrowse((value) => ({ ...value, smartFilter }))
+  const setContinuing = (continuing: boolean) => setBrowse((value) => ({ ...value, continuing }))
+  const setSort = (sort: LibrarySort) => setBrowse((value) => ({ ...value, sort }))
+  const setPage = (page: SetStateAction<number>) =>
+    setBrowse((value) => ({ ...value, page: typeof page === 'function' ? page(value.page) : page }))
+  const setPageSize = (pageSize: number) => setBrowse((value) => ({ ...value, pageSize }))
+  useEffect(() => {
+    try {
+      localStorage.setItem(browseKey(root), JSON.stringify(browse))
+    } catch {
+      /* Browsing works without storage. */
+    }
+  }, [root, browse])
   const [organizing, setOrganizing] = useState<string[] | null>(null)
-  const [sort, setSort] = useState<LibrarySort>('newest')
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(50)
+  const [popup, setPopup] = useState<{ kind: 'filters' | 'file'; anchor: HTMLElement; path?: string } | null>(
+    null,
+  )
+  const popoverId = useId()
+  const [details, setDetails] = useState<{ file: FileItem; autoPlay: boolean } | null>(null)
+  const [layout, setLayout] = useState<'grid' | 'list'>(() => {
+    try {
+      return localStorage.getItem('grab-library-layout') === 'list' ? 'list' : 'grid'
+    } catch {
+      return 'grid'
+    }
+  })
+  function chooseLayout(next: 'grid' | 'list') {
+    setLayout(next)
+    try {
+      localStorage.setItem('grab-library-layout', next)
+    } catch {
+      /* storage may be disabled */
+    }
+  }
   const [editing, setEditing] = useState<{ kind: 'rename' | 'trash'; file: FileItem } | null>(null)
   const [name, setName] = useState('')
   const [error, setError] = useState('')
@@ -113,17 +188,76 @@ export function FileGallery({
       setPage(0)
     }
   }, [collections, collectionFilter])
+  useEffect(() => {
+    if (smartFilter && !smartChoices.some((collection) => collection.id === smartFilter)) {
+      setSmartFilter('')
+      setPage(0)
+    }
+  }, [smartChoices, smartFilter])
   const shown = useMemo(() => {
+    // New file snapshots must use the current time, not the previous minute's timer tick.
+    const now = Date.now() / 1000
     return filterLibrary(files, query, source, format, '', '', sort, kind).filter(
       (file) =>
         (!favoritesOnly || file.favorite) &&
-        (!collectionFilter || file.collections?.includes(collectionFilter)),
+        (!continuing || matchesSmartCollection(file, { playback: 'in_progress' })) &&
+        (!collectionFilter || file.collections?.includes(collectionFilter)) &&
+        (!activeSmart || matchesSmartCollection(file, activeSmart.rules, now)),
     )
-  }, [files, query, source, format, sort, kind, favoritesOnly, collectionFilter])
+  }, [
+    files,
+    query,
+    source,
+    format,
+    sort,
+    kind,
+    favoritesOnly,
+    collectionFilter,
+    continuing,
+    activeSmart,
+    smartNow,
+  ])
   const currentPage = Math.min(page, Math.max(0, Math.ceil(shown.length / pageSize) - 1))
   const visible = shown.slice(currentPage * pageSize, (currentPage + 1) * pageSize)
-  const chosen = files.filter((file) => selected.includes(file.path))
-  const recoveryChosen = recovery.filter((file) => recoverySelected.includes(file.id))
+  const shownAudio = useMemo(() => shown.filter(playableAudio), [shown])
+  const activeFilters = [kind, source, format, collectionFilter, smartFilter, sort !== 'newest'].filter(
+    Boolean,
+  ).length
+  const filterSummary = [
+    kind && [t('Media type'), t({ video: 'Videos', audio: 'Audio', image: 'Images' }[kind] || kind)],
+    source && [
+      t('Source site'),
+      source === 'unknown' ? t('Unknown source') : source === 'local' ? t('Local file') : source,
+    ],
+    format && [t('Format'), format.slice(1).toUpperCase()],
+    collectionFilter && [t('Collection'), collections.find((item) => item.id === collectionFilter)?.name],
+    activeSmart && [t('Smart collection'), smartName(activeSmart, t)],
+    sort !== 'newest' && [
+      t('Sort files'),
+      t({ oldest: 'Oldest first', name: 'Name', largest: 'Largest first' }[sort]),
+    ],
+  ].filter((item): item is string[] => Array.isArray(item) && typeof item[1] === 'string')
+  const hasFilters = !!(query || favoritesOnly || continuing || activeFilters)
+  function resetFilters() {
+    setQuery('')
+    setSource('')
+    setFormat('')
+    setKind('')
+    setCollectionFilter('')
+    setSmartFilter('')
+    setSort('newest')
+    setFavoritesOnly(false)
+    setContinuing(false)
+    setPage(0)
+  }
+  useEffect(() => {
+    if (popup?.kind === 'file' && !visible.some((file) => file.path === popup.path)) setPopup(null)
+  }, [popup, visible])
+  const chosen = useMemo(() => files.filter((file) => selectedKeys.has(file.path)), [files, selectedKeys])
+  const recoveryChosen = useMemo(
+    () => recovery.filter((file) => recoveryKeys.has(file.id)),
+    [recovery, recoveryKeys],
+  )
   async function organize(
     paths: string[],
     patch: { favorite?: boolean; collection_id?: string; remove?: boolean },
@@ -160,11 +294,7 @@ export function FileGallery({
   }
   function selectPage() {
     const paths = visible.map((file) => file.path)
-    setSelected((items) =>
-      paths.every((path) => items.includes(path))
-        ? items.filter((item) => !paths.includes(item))
-        : [...new Set([...items, ...paths])],
-    )
+    setSelected((items) => [...new Set([...items, ...paths])])
   }
   async function changeMany(action: 'trash' | 'restore' | 'purge') {
     const items = action === 'trash' ? chosen.map((file) => file.path) : recoveryChosen.map((file) => file.id)
@@ -192,9 +322,9 @@ export function FileGallery({
         }
       }
       const setter = action === 'trash' ? setSelected : setRecoverySelected
-      setter((values) => values.filter((value) => !result.processed.includes(value)))
-      if (action !== 'trash')
-        setRecovery((values) => values.filter((value) => !result.processed.includes(value.id)))
+      const processed = new Set(result.processed)
+      setter((values) => values.filter((value) => !processed.has(value)))
+      if (action !== 'trash') setRecovery((values) => values.filter((value) => !processed.has(value.id)))
       onToast(
         t('Updated {count} files; {failed} could not be changed.', {
           count: result.processed.length,
@@ -240,9 +370,21 @@ export function FileGallery({
       setBusy(false)
     }
   }
-  const sources = [...new Set(files.map((file) => file.source || 'unknown'))].sort()
-  const formats = [...new Set(files.map((file) => '.' + file.name.split('.').pop()?.toLowerCase()))].sort()
+  const sources = useMemo(() => [...new Set(files.map((file) => file.source || 'unknown'))].sort(), [files])
+  const formats = useMemo(
+    () => [...new Set(files.map((file) => '.' + file.name.split('.').pop()?.toLowerCase()))].sort(),
+    [files],
+  )
   const report = (e: unknown) => onToast(t(e instanceof Error ? e.message : 'Could not open it'), true)
+  function addAudio(items: FileItem[]) {
+    if (!audioPlayer) return
+    const added = audioPlayer.enqueue(items)
+    onToast(
+      t('Added {count} tracks to playback queue. Existing tracks are kept once; the limit is 500.', {
+        count: added,
+      }),
+    )
+  }
   function undoAction(ids: string[]) {
     let pending = [...ids]
     return {
@@ -276,7 +418,8 @@ export function FileGallery({
     setError('')
     try {
       if (editing.kind === 'rename') {
-        await renameFile(editing.file.path, name)
+        const renamed = await renameFile(editing.file.path, name)
+        audioPlayer?.rename(editing.file.path, renamed.path)
         onToast(t('File renamed'))
       } else {
         const result = await trashFile(editing.file.path)
@@ -340,26 +483,85 @@ export function FileGallery({
   }
 
   return (
-    <section className="card grid content-start gap-4" aria-labelledby="files-title">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="eyebrow">{t('Library')}</div>
-          <h2 id="files-title" className="mt-1 text-lg font-semibold">
-            {t('Downloaded files')}
-          </h2>
+    <section className="card library-panel grid content-start gap-4" aria-labelledby="files-title">
+      <div className="panel-toolbar library-toolbar">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="eyebrow library-eyebrow">{t('Library')}</div>
+            <h2 id="files-title" className="mt-1 text-lg font-semibold">
+              {t('Downloaded files')}
+            </h2>
+          </div>
+          <div className="compact-actions library-tools flex flex-wrap gap-2">
+            <ImportFiles onRefresh={onRefresh} onToast={onToast} />
+            <CollectionManager
+              collections={collections}
+              files={files}
+              smartCollections={smartCollections}
+              onRefresh={onRefresh}
+              onToast={onToast}
+              onViewSmart={(id) => {
+                resetFilters()
+                setSmartFilter(id)
+              }}
+            />
+            <Button variant="ghost" disabled={busy} onClick={openRecovery}>
+              {t('Recovery')}
+            </Button>
+            <LibraryOrganizer
+              root={root}
+              editingBlocked={editingBlocked || busy}
+              onRecycled={(result) => {
+                onToast(
+                  t('Updated {count} files; {failed} could not be changed.', {
+                    count: result.processed.length,
+                    failed: result.failed.length,
+                  }),
+                  result.failed.length > 0,
+                  result.recovery_ids.length ? undoAction(result.recovery_ids) : undefined,
+                )
+                if (result.processed.length) onRefresh()
+              }}
+            />
+            <Button variant="ghost" onClick={onRefresh}>
+              <RefreshCw aria-hidden size={15} /> {t('Refresh')}
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <CollectionManager collections={collections} onRefresh={onRefresh} onToast={onToast} />
-          <Button variant="ghost" disabled={busy} onClick={openRecovery}>
-            {t('Recovery')}
-          </Button>
-          <Button variant="ghost" onClick={onRefresh}>
-            <RefreshCw aria-hidden size={15} /> {t('Refresh')}
-          </Button>
-        </div>
-      </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+        <label className="library-search relative">
+          <span className="sr-only">{t('Search files')}</span>
+          <Search
+            aria-hidden
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+          />
+          <input
+            className="field !pl-9"
+            type="search"
+            placeholder={t('Search titles, tags and notes')}
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setPage(0)
+            }}
+          />
+        </label>
+      </div>
+      <div className="library-controls flex flex-wrap items-center gap-3">
+        <Button
+          aria-label={t('Continue watching / listening')}
+          aria-pressed={continuing}
+          onClick={() => {
+            setContinuing(!continuing)
+            setPage(0)
+          }}
+        >
+          <span className="library-continue-full">{t('Continue watching / listening')}</span>
+          <span className="library-continue-short" aria-hidden>
+            {t('Resume playback')}
+          </span>
+        </Button>
         <Button
           aria-pressed={favoritesOnly}
           onClick={() => {
@@ -370,28 +572,106 @@ export function FileGallery({
           <Star aria-hidden size={15} className={favoritesOnly ? 'fill-amber-300 text-amber-300' : ''} />{' '}
           {t('Favorites')}
         </Button>
-        <label className="control min-w-0 flex-1">
-          <span>{t('Collection')}</span>
-          <select
-            className="field"
-            value={collectionFilter}
-            onChange={(event) => {
-              setCollectionFilter(event.target.value)
-              setPage(0)
-            }}
+        <Button
+          aria-label={t('Filters')}
+          aria-haspopup="dialog"
+          aria-expanded={popup?.kind === 'filters'}
+          aria-controls={popup?.kind === 'filters' ? popoverId : undefined}
+          title={activeFilters ? t('{count} active filters', { count: activeFilters }) : t('Filters')}
+          onClick={(event) => {
+            const anchor = event.currentTarget
+            setPopup((current) => (current?.kind === 'filters' ? null : { kind: 'filters', anchor }))
+          }}
+        >
+          <SlidersHorizontal aria-hidden size={15} /> {t('Filters')}
+          {activeFilters > 0 && (
+            <span aria-hidden className="rounded-full bg-white/[.1] px-1.5 text-xs">
+              {activeFilters}
+            </span>
+          )}
+        </Button>
+        {popup?.kind === 'filters' && (
+          <Popover id={popoverId} label={t('Filters')} anchor={popup.anchor} onClose={() => setPopup(null)}>
+            <LibraryFilters
+              values={{ kind, source, format, collection: collectionFilter, smart: smartFilter, sort }}
+              sources={sources}
+              formats={formats}
+              collections={collections}
+              smartCollections={smartChoices}
+              onChange={(change) => {
+                if (change.kind !== undefined) setKind(change.kind)
+                if (change.source !== undefined) setSource(change.source)
+                if (change.format !== undefined) setFormat(change.format)
+                if (change.collection !== undefined) setCollectionFilter(change.collection)
+                if (change.smart !== undefined) setSmartFilter(change.smart)
+                if (change.sort !== undefined) setSort(change.sort)
+                setPage(0)
+              }}
+            />
+            <div className="mt-4 flex justify-between gap-2">
+              <Button
+                variant="ghost"
+                disabled={!hasFilters}
+                onClick={(event) => {
+                  resetFilters()
+                  event.currentTarget
+                    .closest('[role="dialog"]')
+                    ?.querySelector('select')
+                    ?.focus({ preventScroll: true })
+                }}
+              >
+                {t('Reset filters')}
+              </Button>
+              <Button
+                onClick={() => {
+                  popup.anchor.focus({ preventScroll: true })
+                  setPopup(null)
+                }}
+              >
+                {t('Done')}
+              </Button>
+            </div>
+          </Popover>
+        )}
+        <div className="segmented" role="group" aria-label={t('Library view')}>
+          <button
+            type="button"
+            aria-label={t('Grid view')}
+            aria-pressed={layout === 'grid'}
+            onClick={() => chooseLayout('grid')}
           >
-            <option value="">{t('All collections')}</option>
-            {collections.map((collection) => (
-              <option key={collection.id} value={collection.id}>
-                {collection.name}
-              </option>
-            ))}
-          </select>
-        </label>
+            <LayoutGrid aria-hidden size={16} />
+          </button>
+          <button
+            type="button"
+            aria-label={t('List view')}
+            aria-pressed={layout === 'list'}
+            onClick={() => chooseLayout('list')}
+          >
+            <List aria-hidden size={16} />
+          </button>
+        </div>
       </div>
 
+      {filterSummary.length > 0 && (
+        <div
+          role="group"
+          aria-label={t('Active filters')}
+          className="flex min-w-0 flex-wrap gap-1.5 text-xs text-zinc-400"
+        >
+          {filterSummary.map(([label, value]) => (
+            <span key={label} className="min-w-0 max-w-full break-all rounded-lg bg-white/[.05] px-2 py-1">
+              {label}: {value}
+            </span>
+          ))}
+        </div>
+      )}
+
       {scan && (
-        <div role="status" className="grid gap-1 text-xs text-zinc-400">
+        <div
+          role="status"
+          className={`library-scan ${scan.incomplete ? '' : 'library-scan-complete'} grid gap-1 text-xs text-zinc-400`}
+        >
           <p>
             {t('Scanned {checked} entries; found {count} media files.', {
               checked: scan.checked,
@@ -415,133 +695,78 @@ export function FileGallery({
         </div>
       )}
 
-      <label className="relative">
-        <span className="sr-only">{t('Search files')}</span>
-        <Search
-          aria-hidden
-          size={15}
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
-        />
-        <input
-          className="field !pl-9"
-          type="search"
-          placeholder={t('Search files')}
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setPage(0)
-          }}
-        />
-      </label>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="control">
-          <span>{t('Media type')}</span>
-          <select
-            className="field"
-            value={kind}
-            onChange={(e) => {
-              setKind(e.target.value)
-              setPage(0)
-            }}
-          >
-            <option value="">{t('All media')}</option>
-            <option value="video">{t('Videos')}</option>
-            <option value="audio">{t('Audio')}</option>
-            <option value="image">{t('Images')}</option>
-          </select>
-        </label>
-        <label className="control">
-          <span>{t('Source site')}</span>
-          <select
-            className="field"
-            value={source}
-            onChange={(e) => {
-              setSource(e.target.value)
-              setPage(0)
-            }}
-          >
-            <option value="">{t('All sources')}</option>
-            {sources.map((site) => (
-              <option key={site} value={site}>
-                {site === 'unknown' ? t('Unknown source') : site}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="control">
-          <span>{t('Format')}</span>
-          <select
-            className="field"
-            value={format}
-            onChange={(e) => {
-              setFormat(e.target.value)
-              setPage(0)
-            }}
-          >
-            <option value="">{t('All formats')}</option>
-            {formats.map((extension) => (
-              <option key={extension} value={extension}>
-                {extension.slice(1).toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="control">
-          <span>{t('Sort files')}</span>
-          <select
-            className="field"
-            value={sort}
-            onChange={(e) => {
-              setSort(e.target.value as LibrarySort)
-              setPage(0)
-            }}
-          >
-            <option value="newest">{t('Newest first')}</option>
-            <option value="oldest">{t('Oldest first')}</option>
-            <option value="name">{t('Name')}</option>
-            <option value="largest">{t('Largest first')}</option>
-          </select>
-        </label>
-      </div>
-      <div className="flex items-center justify-between text-xs text-zinc-400">
-        <span>{t('{count} files', { count: shown.length })}</span>
-        {(query || source || format || kind || favoritesOnly || collectionFilter) && (
-          <button
-            className="action-btn"
-            onClick={() => {
-              setQuery('')
-              setSource('')
-              setFormat('')
-              setKind('')
-              setFavoritesOnly(false)
-              setCollectionFilter('')
-              setPage(0)
-            }}
-          >
+      <div className="library-results-bar flex min-h-8 flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
+        <span className="library-count">
+          {hasFilters
+            ? t(scan?.incomplete ? '{count} of {total} discovered files' : '{count} of {total} files', {
+                count: shown.length,
+                total: files.length,
+              })
+            : t(scan?.incomplete ? '{count} discovered files' : '{count} files', { count: files.length })}
+        </span>
+        {hasFilters && shown.length > 0 && popup?.kind !== 'filters' && (
+          <button className="action-btn" onClick={resetFilters}>
             {t('Reset filters')}
           </button>
         )}
       </div>
-      {shown.length > 0 && (
+      {audioPlayer && shownAudio.length > 0 && (
         <div
-          className="flex flex-wrap items-center gap-2 text-xs"
+          className="compact-actions flex flex-wrap items-center gap-2"
+          role="group"
+          aria-label={t('Audio playback actions')}
+        >
+          <Button onClick={() => audioPlayer.playFiles(shownAudio.slice(0, AUDIO_QUEUE_LIMIT))}>
+            <Play aria-hidden size={15} /> {t('Play filtered audio')} ·{' '}
+            {Math.min(shownAudio.length, AUDIO_QUEUE_LIMIT)}
+          </Button>
+          <Button onClick={() => addAudio(shownAudio)}>
+            <ListPlus aria-hidden size={15} /> {t('Add filtered audio to queue')}
+          </Button>
+          {shownAudio.length > AUDIO_QUEUE_LIMIT && (
+            <span className="text-xs text-zinc-400">
+              {t('Playback queues hold up to 500 tracks. Narrow your filters to choose fewer.')}
+            </span>
+          )}
+        </div>
+      )}
+      {(hasFilters || page > 0 || pageSize !== 50) && (
+        <div>
+          <Button variant="ghost" disabled={busy} onClick={() => setBrowse({ ...DEFAULT_BROWSE })}>
+            {t('Reset browsing')}
+          </Button>
+        </div>
+      )}
+      {(shown.length > 0 || chosen.length > 0) && (
+        <div
+          className="compact-actions library-selection flex flex-wrap items-center gap-2 text-xs"
           role="group"
           aria-label={t('Library selection')}
         >
-          <Button disabled={busy || editingBlocked} onClick={selectPage}>
-            {t(
-              visible.every((file) => selected.includes(file.path))
-                ? 'Deselect this page'
-                : 'Select this page',
-            )}
+          <Button
+            disabled={busy || editingBlocked || visible.every((file) => selectedKeys.has(file.path))}
+            onClick={selectPage}
+          >
+            {t('Select this page')}
           </Button>
           <span>
             {t('{count} selected', { count: chosen.length })} ·{' '}
             {formatBytes(chosen.reduce((sum, file) => sum + file.size, 0))}
           </span>
+          <SelectionScope
+            items={chosen.map((file) => ({ key: file.path, label: file.path }))}
+            visible={visible.map((file) => file.path)}
+            disabled={busy}
+            onClear={() => setSelected([])}
+            onRemove={(path) => setSelected((previous) => previous.filter((item) => item !== path))}
+          />
           {chosen.length > 0 && (
             <>
+              {audioPlayer && chosen.some(playableAudio) && (
+                <Button disabled={busy} onClick={() => addAudio(chosen)}>
+                  {t('Add selected audio to queue')}
+                </Button>
+              )}
               <Button
                 disabled={busy}
                 onClick={() =>
@@ -552,17 +777,6 @@ export function FileGallery({
                 }
               >
                 {t('Favorite selected')}
-              </Button>
-              <Button
-                disabled={busy}
-                onClick={() =>
-                  organize(
-                    chosen.map((file) => file.path),
-                    { favorite: false },
-                  )
-                }
-              >
-                {t('Unfavorite selected')}
               </Button>
               <Button
                 disabled={busy}
@@ -582,9 +796,6 @@ export function FileGallery({
               >
                 {t('Move selected to recovery')}
               </Button>
-              <Button disabled={busy} onClick={() => setSelected([])}>
-                {t('Clear selection')}
-              </Button>
             </>
           )}
         </div>
@@ -602,42 +813,50 @@ export function FileGallery({
 
       {files.length === 0 ? (
         <div className="grid justify-items-center gap-3 rounded-xl bg-white/[.025] px-4 py-8 text-center text-sm text-zinc-400">
-          <p>{t('No completed files yet.')}</p>
-          <p className="text-xs">{t('Finished downloads appear here with their source and file details.')}</p>
+          <p>{t(scan?.incomplete ? 'No media files found in scanned folders.' : 'No media files yet.')}</p>
+          <p className="text-xs">
+            {t(
+              scan?.incomplete
+                ? 'Review the scan warning above, then refresh to try again.'
+                : 'Import local files or download a link to start your collection.',
+            )}
+          </p>
           {onNewDownload && <Button onClick={onNewDownload}>{t('Paste a link')}</Button>}
         </div>
       ) : shown.length === 0 ? (
-        <p className="rounded-xl bg-white/[.025] px-4 py-8 text-center text-sm text-zinc-400">
-          {t('No files match your search.')}
-        </p>
+        <div className="library-empty grid justify-items-center gap-3 rounded-xl bg-white/[.025] px-4 py-8 text-center text-sm text-zinc-400">
+          <p className="font-medium text-zinc-100">{t('No files match these conditions.')}</p>
+          <p className="text-xs">{t('Try another search or clear all conditions to see your files.')}</p>
+          <Button onClick={resetFilters}>{t('Clear all conditions')}</Button>
+        </div>
       ) : (
-        <ul className="grid gap-1">
+        <ul className={layout === 'grid' ? 'library-grid' : 'library-list grid gap-1'}>
           {visible.map((f) => (
             <li
               key={f.path}
-              className="flex flex-wrap items-center gap-3 rounded-xl px-2 py-3 hover:bg-white/[.03]"
+              className="library-file flex flex-wrap items-center gap-3 rounded-xl px-2 py-3 hover:bg-white/[.03]"
             >
               {fileKind(f) === 'image' ? (
                 <ImageThumbnail file={f} onPreview={() => previewImage(f)} />
               ) : (
-                <span
-                  aria-hidden
-                  className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/[.05] text-zinc-400"
-                >
-                  {fileKind(f) === 'audio' ? <Music size={15} /> : <Film size={15} />}
-                </span>
+                <MediaArtwork file={f} onOpen={() => setDetails({ file: f, autoPlay: false })} />
               )}
               <input
                 type="checkbox"
-                checked={selected.includes(f.path)}
+                checked={selectedKeys.has(f.path)}
                 disabled={busy || editingBlocked}
                 aria-label={t('Select {name}', { name: f.name })}
                 onChange={() => toggle(f.path)}
               />
-              <div className="min-w-0 flex-1 text-sm" title={f.path}>
-                <p className="truncate" title={f.name}>
-                  {displayFilename(f.name)}
-                </p>
+              <div className="file-info min-w-0 flex-1 text-sm" title={f.path}>
+                <button
+                  className="block max-w-full truncate text-left font-medium"
+                  title={f.name}
+                  aria-label={t('Details for {name}', { name: f.name })}
+                  onClick={() => setDetails({ file: f, autoPlay: false })}
+                >
+                  {layout === 'grid' && f.title ? f.title : displayFilename(f.name)}
+                </button>
                 {f.complete === false && (
                   <p className="mt-1 text-xs text-amber-300">
                     {t('Processing incomplete')} ·{' '}
@@ -649,8 +868,18 @@ export function FileGallery({
                   </p>
                 )}
                 <p className="mt-1 truncate text-xs text-zinc-500">
-                  {f.source || t('Unknown source')} · {f.path}
+                  {f.source === 'local' ? t('Local file') : f.source || t('Unknown source')} · {f.path}
                 </p>
+                {!!f.tags?.length && (
+                  <p className="mt-1 truncate text-xs text-emerald-300">{f.tags.join(' · ')}</p>
+                )}
+                {f.playback && (
+                  <p className="mt-1 text-xs text-zinc-400">
+                    {f.playback.finished
+                      ? t('Finished playback')
+                      : t('Continue at {time}', { time: formatDuration(f.playback.position) })}
+                  </p>
+                )}
               </div>
               <span className="hidden shrink-0 text-xs tabular-nums text-zinc-500 sm:inline">
                 {formatBytes(f.size)}
@@ -658,7 +887,7 @@ export function FileGallery({
               <span className="hidden shrink-0 text-xs text-zinc-500 md:inline">
                 {formatDate(f.downloaded ?? f.mtime)}
               </span>
-              <div className="flex flex-wrap gap-1">
+              <div className="file-actions flex flex-wrap gap-1">
                 <button
                   className="action-btn"
                   disabled={busy}
@@ -668,17 +897,6 @@ export function FileGallery({
                 >
                   <Star aria-hidden size={13} className={f.favorite ? 'fill-amber-300 text-amber-300' : ''} />
                 </button>
-                <button
-                  className="action-btn"
-                  disabled={busy}
-                  aria-label={t('Manage collections for {name}', { name: f.name })}
-                  onClick={() => {
-                    setOrganizing([f.path])
-                    setError('')
-                  }}
-                >
-                  <ListPlus aria-hidden size={13} />
-                </button>
                 {f.complete === false && f.can_repair && (
                   <Button disabled={busy || editingBlocked} onClick={() => requestRepair(f)}>
                     {t('Repair')}
@@ -687,6 +905,18 @@ export function FileGallery({
                 {fileKind(f) === 'image' ? (
                   <button className="action-btn" onClick={() => previewImage(f)}>
                     <ImageIcon aria-hidden size={13} /> {t('Preview image')}
+                  </button>
+                ) : f.complete !== false ? (
+                  <button
+                    type="button"
+                    className="action-btn"
+                    onClick={() => {
+                      if (fileKind(f) === 'audio' && audioPlayer) audioPlayer.playFile(f)
+                      else setDetails({ file: f, autoPlay: true })
+                    }}
+                  >
+                    <Play aria-hidden size={13} />
+                    {t(fileKind(f) === 'audio' ? 'Play audio' : 'Play video')}
                   </button>
                 ) : windowMode ? (
                   <button type="button" className="action-btn" onClick={() => openFile(f.path).catch(report)}>
@@ -699,63 +929,108 @@ export function FileGallery({
                     {t(f.complete === false ? 'Open' : fileKind(f) === 'audio' ? 'Play audio' : 'Play video')}
                   </a>
                 )}
-                <a className="action-btn" href={fileUrl(f.path)} download={f.name}>
-                  {t('Download')}
-                </a>
-
                 <button
                   type="button"
                   className="action-btn"
-                  onClick={() => openFolder(f.path).catch(report)}
-                  aria-label={t('Show {name} in folder', { name: f.name })}
+                  aria-label={t('More actions for {name}', { name: f.name })}
+                  aria-haspopup="dialog"
+                  aria-expanded={popup?.kind === 'file' && popup.path === f.path}
+                  aria-controls={popup?.kind === 'file' && popup.path === f.path ? popoverId : undefined}
+                  onClick={(event) => {
+                    const anchor = event.currentTarget
+                    setPopup((current) =>
+                      current?.kind === 'file' && current.path === f.path
+                        ? null
+                        : { kind: 'file', path: f.path, anchor },
+                    )
+                  }}
                 >
-                  <FolderOpen aria-hidden size={13} />
-                  {t('Show in folder')}
+                  <Ellipsis aria-hidden size={16} /> {t('More')}
                 </button>
-                {f.source_url && windowMode ? (
-                  <button
-                    className="action-btn"
-                    aria-label={t('Open original page')}
-                    onClick={() => openExternalUrl(f.source_url!).catch(report)}
+                {popup?.kind === 'file' && popup.path === f.path && (
+                  <Popover
+                    id={popoverId}
+                    label={t('More actions for {name}', { name: f.name })}
+                    anchor={popup.anchor}
+                    onClose={() => setPopup(null)}
+                    actions
                   >
-                    <ExternalLink aria-hidden size={13} />
-                  </button>
-                ) : (
-                  f.source_url && (
-                    <a
+                    {audioPlayer && playableAudio(f) && (
+                      <button className="action-btn" onClick={() => addAudio([f])}>
+                        <ListPlus aria-hidden size={13} /> {t('Add to playback queue')}
+                      </button>
+                    )}
+                    <button
                       className="action-btn"
-                      href={f.source_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label={t('Open original page')}
+                      disabled={busy}
+                      aria-label={t('Manage collections for {name}', { name: f.name })}
+                      onClick={() => {
+                        setOrganizing([f.path])
+                        setError('')
+                      }}
                     >
-                      <ExternalLink aria-hidden size={13} />
+                      <ListPlus aria-hidden size={13} /> {t('Organize collections')}
+                    </button>
+                    <a className="action-btn" href={fileUrl(f.path)} download={f.name}>
+                      <Download aria-hidden size={13} /> {t('Download')}
                     </a>
-                  )
+
+                    <button
+                      type="button"
+                      className="action-btn"
+                      onClick={() => openFolder(f.path).catch(report)}
+                      aria-label={t('Show {name} in folder', { name: f.name })}
+                    >
+                      <FolderOpen aria-hidden size={13} />
+                      {t('Show in folder')}
+                    </button>
+                    {f.source_url && windowMode ? (
+                      <button
+                        className="action-btn"
+                        aria-label={t('Open original page')}
+                        onClick={() => openExternalUrl(f.source_url!).catch(report)}
+                      >
+                        <ExternalLink aria-hidden size={13} /> {t('Original page')}
+                      </button>
+                    ) : (
+                      f.source_url && (
+                        <a
+                          className="action-btn"
+                          href={f.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={t('Open original page')}
+                        >
+                          <ExternalLink aria-hidden size={13} /> {t('Original page')}
+                        </a>
+                      )
+                    )}
+                    <button
+                      className="action-btn"
+                      disabled={busy || editingBlocked}
+                      aria-label={t('Rename {name}', { name: f.name })}
+                      onClick={() => {
+                        setError('')
+                        setName(f.name)
+                        setEditing({ kind: 'rename', file: f })
+                      }}
+                    >
+                      <Pencil aria-hidden size={13} /> {t('Rename')}
+                    </button>
+                    <button
+                      className="action-btn"
+                      disabled={busy || editingBlocked}
+                      aria-label={t('Move {name} to recovery', { name: f.name })}
+                      data-danger
+                      onClick={() => {
+                        setError('')
+                        setEditing({ kind: 'trash', file: f })
+                      }}
+                    >
+                      <Trash2 aria-hidden size={13} /> {t('Move to recovery')}
+                    </button>
+                  </Popover>
                 )}
-                <button
-                  className="action-btn"
-                  disabled={busy || editingBlocked}
-                  aria-label={t('Rename {name}', { name: f.name })}
-                  onClick={() => {
-                    setError('')
-                    setName(f.name)
-                    setEditing({ kind: 'rename', file: f })
-                  }}
-                >
-                  <Pencil aria-hidden size={13} />
-                </button>
-                <button
-                  className="action-btn"
-                  disabled={busy || editingBlocked}
-                  aria-label={t('Move {name} to recovery', { name: f.name })}
-                  onClick={() => {
-                    setError('')
-                    setEditing({ kind: 'trash', file: f })
-                  }}
-                >
-                  <Trash2 aria-hidden size={13} />
-                </button>
               </div>
             </li>
           ))}
@@ -804,6 +1079,19 @@ export function FileGallery({
             {t('Next')}
           </Button>
         </div>
+      )}
+      {details && (
+        <MediaDetails
+          audioPlayer={audioPlayer}
+          key={details.file.path}
+          file={files.find((file) => file.path === details.file.path) || details.file}
+          collections={collections}
+          autoPlay={details.autoPlay}
+          windowMode={windowMode}
+          onClose={() => setDetails(null)}
+          onRefresh={onRefresh}
+          onToast={onToast}
+        />
       )}
       <Modal
         open={organizing !== null}
@@ -1105,7 +1393,7 @@ export function FileGallery({
               <div key={item.id} className="flex items-center gap-3 rounded-xl bg-white/[.025] p-3">
                 <input
                   type="checkbox"
-                  checked={recoverySelected.includes(item.id)}
+                  checked={recoveryKeys.has(item.id)}
                   disabled={busy || editingBlocked}
                   aria-label={t('Select {name}', { name: item.path })}
                   onChange={() => toggle(item.id, true)}

@@ -38,7 +38,10 @@ export function filterLibrary(
     .filter(
       (file) =>
         (!kind || fileKind(file) === kind) &&
-        (!text || `${file.path} ${file.title || ''}`.toLocaleLowerCase().includes(text)) &&
+        (!text ||
+          `${file.path} ${file.title || ''} ${(file.tags || []).join(' ')} ${file.note || ''}`
+            .toLocaleLowerCase()
+            .includes(text)) &&
         (!source || (file.source || 'unknown') === source) &&
         (!format || file.name.toLowerCase().endsWith(format)) &&
         (file.downloaded ?? file.mtime) >= start &&

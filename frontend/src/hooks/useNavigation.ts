@@ -19,7 +19,7 @@ function initialView(): AppView {
   } catch {
     // Storage can be disabled in hardened WebView/browser configurations.
   }
-  return 'new'
+  return 'library'
 }
 
 export function useNavigation() {

@@ -51,7 +51,7 @@ export function DoctorList({ checks, onCopy, onFix, busyAction }: Props) {
                 {c.action && (
                   <button
                     type="button"
-                    className="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-black hover:bg-zinc-200 disabled:opacity-50"
+                    className="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-zinc-950 hover:bg-zinc-200 disabled:opacity-50"
                     disabled={busyAction !== null}
                     onClick={() => onFix(c)}
                   >

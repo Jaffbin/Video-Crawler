@@ -8,6 +8,54 @@ import { resetTokenCache } from '../../api/client'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it.each(['skip', 'download'])('asks about saved files before adding tasks (%s)', async (action) => {
+  const calls: any[] = []
+  resetTokenCache()
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body)
+      calls.push(body)
+      return new Response(
+        JSON.stringify(
+          body.existing_action
+            ? { ids: action === 'download' ? ['1234abcd'] : [], skipped_existing: action === 'skip' ? 1 : 0 }
+            : {
+                ids: [],
+                existing: [
+                  {
+                    url: 'https://example.com/video',
+                    path: 'old.mp4',
+                    name: 'old.mp4',
+                    profile_known: true,
+                    settings_match: false,
+                    profile: { mode: 'mp4', quality: '720' },
+                  },
+                ],
+              },
+        ),
+      )
+    }),
+  )
+  const onAdded = vi.fn(),
+    user = userEvent.setup()
+  render(<Panel onAdded={onAdded} />)
+  await user.type(screen.getByRole('textbox', { name: /links to download/i }), 'https://example.com/video')
+  await user.click(screen.getByRole('button', { name: 'Start download' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Already downloaded' })
+  expect(onAdded).not.toHaveBeenCalled()
+  expect(dialog).toHaveTextContent('720p')
+  expect(dialog).toHaveTextContent('Saved settings differ.')
+  await user.click(
+    within(dialog).getByRole('button', {
+      name: action === 'skip' ? 'Use existing files' : 'Download another copy',
+    }),
+  )
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  expect(calls[1].existing_action).toBe(action)
+  expect(onAdded).toHaveBeenCalledTimes(action === 'download' ? 1 : 0)
+})
+
 function Panel({
   onAdded = vi.fn(),
   onToast = vi.fn(),
@@ -39,6 +87,7 @@ it('offers understandable MP3 quality presets and sends the chosen bitrate', asy
   )
   const user = userEvent.setup()
   render(<Panel />)
+  await user.click(screen.getByRole('radio', { name: 'Audio' }))
   await user.click(screen.getByRole('radio', { name: 'MP3 audio' }))
   expect(screen.getByRole('combobox', { name: 'Audio quality' })).toHaveValue('192')
   await user.selectOptions(screen.getByRole('combobox', { name: 'Audio quality' }), '320')
@@ -63,9 +112,11 @@ it('keeps source audio independent of bitrate and video settings with a separate
   )
   const user = userEvent.setup()
   render(<Panel />)
+  await user.click(screen.getByRole('radio', { name: 'Audio' }))
   await user.click(screen.getByRole('radio', { name: 'Keep source audio' }))
   expect(screen.queryByRole('combobox', { name: 'Audio quality' })).not.toBeInTheDocument()
   expect(screen.queryByText('Download subtitles')).not.toBeInTheDocument()
+  await user.click(screen.getByText('Subtitles and cover', { selector: 'summary' }))
   await user.click(screen.getByRole('checkbox', { name: 'Save a separate cover' }))
   expect(screen.getByLabelText('Download summary')).toHaveTextContent(
     'Source audio · best available · no re-encoding',
@@ -217,6 +268,7 @@ it('switches to cover and image modes, hides media conversion settings and submi
   )
   const user = userEvent.setup()
   render(<Panel />)
+  await user.click(screen.getByRole('radio', { name: 'Images' }))
   await user.click(screen.getByRole('radio', { name: 'Video cover' }))
   expect(screen.queryByLabelText('Maximum video quality')).not.toBeInTheDocument()
   expect(screen.queryByText('Download subtitles')).not.toBeInTheDocument()

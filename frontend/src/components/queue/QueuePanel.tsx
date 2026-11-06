@@ -6,6 +6,7 @@ import type { Job } from '../../types/api'
 import { Button } from '../ui/Button'
 import { JobCard } from './JobCard'
 import { useI18n } from '../../i18n'
+import { SelectionScope } from '../ui/SelectionScope'
 
 type Filter = 'all' | 'active' | 'done' | 'failed'
 
@@ -117,78 +118,83 @@ export function QueuePanel({
   }
 
   return (
-    <section className="card grid content-start gap-4" aria-labelledby="queue-title">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="eyebrow">{t('Queue')}</div>
-          <h2 id="queue-title" className="mt-1 text-lg font-semibold">
-            {t('Downloads')}
-            <span className="ml-2 text-sm font-normal text-zinc-400">
-              {jobs.length === shown.length ? `${jobs.length}` : `${shown.length} of ${jobs.length}`}
-            </span>
-          </h2>
+    <section
+      className="queue-panel card grid min-w-0 grid-cols-1 content-start gap-4"
+      aria-labelledby="queue-title"
+    >
+      <div className="panel-toolbar">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="eyebrow">{t('Queue')}</div>
+            <h2 id="queue-title" className="mt-1 text-lg font-semibold">
+              {t('Downloads')}
+              <span className="ml-2 text-sm font-normal text-zinc-400">
+                {jobs.length === shown.length ? `${jobs.length}` : `${shown.length} of ${jobs.length}`}
+              </span>
+            </h2>
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button disabled={busy} onClick={() => control(() => pauseQueue(!queuePaused))}>
+              {queuePaused ? <Play aria-hidden size={14} /> : <Pause aria-hidden size={14} />}
+              {t(queuePaused ? 'Resume queue' : 'Pause queue')}
+            </Button>
+            {successRate !== null && (
+              <div
+                className="rounded-xl bg-emerald-500/[.08] px-3 py-1.5 text-xs text-emerald-200"
+                title={t('Calculated from completed and failed downloads; canceled jobs are excluded.')}
+              >
+                {t('Success rate')}: <strong>{successRate}%</strong> ({succeeded}/{measured})
+              </div>
+            )}
+            <Button variant="ghost" onClick={clear} disabled={!finished}>
+              {t('Clear finished')}
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button disabled={busy} onClick={() => control(() => pauseQueue(!queuePaused))}>
-            {queuePaused ? <Play aria-hidden size={14} /> : <Pause aria-hidden size={14} />}
-            {t(queuePaused ? 'Resume queue' : 'Pause queue')}
-          </Button>
-          {successRate !== null && (
-            <div
-              className="rounded-xl bg-emerald-500/[.08] px-3 py-1.5 text-xs text-emerald-200"
-              title={t('Calculated from completed and failed downloads; canceled jobs are excluded.')}
-            >
-              {t('Success rate')}: <strong>{successRate}%</strong> ({succeeded}/{measured})
-            </div>
-          )}
-          <Button variant="ghost" onClick={clear} disabled={!finished}>
-            {t('Clear finished')}
-          </Button>
+
+        <div className="flex flex-wrap gap-2">
+          <label className="relative min-w-0 flex-1 basis-48">
+            <span className="sr-only">{t('Search downloads')}</span>
+            <Search
+              aria-hidden
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+            />
+            <input
+              className="field !pl-9"
+              type="search"
+              placeholder={t('Search title or link')}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          <div className="segmented" role="radiogroup" aria-label={t('Filter by status')}>
+            {FILTERS.map((f) => (
+              <button
+                key={f}
+                type="button"
+                role="radio"
+                aria-checked={filter === f}
+                onClick={() => setFilter(f)}
+              >
+                {t(f === 'all' ? 'All' : f === 'active' ? 'Active' : f === 'done' ? 'Done' : 'Failed')}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-
       {queuePaused && (
         <p role="status" className="rounded-xl bg-amber-500/10 p-3 text-xs text-amber-200">
           {t('Queue paused. Running downloads continue; waiting tasks start when you resume.')}
         </p>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <label className="relative min-w-48 flex-1">
-          <span className="sr-only">{t('Search downloads')}</span>
-          <Search
-            aria-hidden
-            size={15}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
-          />
-          <input
-            className="field !pl-9"
-            type="search"
-            placeholder={t('Search title or link')}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-        <div className="segmented" role="radiogroup" aria-label={t('Filter by status')}>
-          {FILTERS.map((f) => (
-            <button
-              key={f}
-              type="button"
-              role="radio"
-              aria-checked={filter === f}
-              onClick={() => setFilter(f)}
-            >
-              {t(f === 'all' ? 'All' : f === 'active' ? 'Active' : f === 'done' ? 'Done' : 'Failed')}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {shown.length > 0 && (
+      {(shown.length > 0 || selectedJobs.length > 0) && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl bg-white/[.025] px-3 py-2 text-xs">
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
+              disabled={!shown.length || busy}
               checked={allShownSelected}
               onChange={() =>
                 setSelected((previous) => {
@@ -201,6 +207,13 @@ export function QueuePanel({
             {t('Select visible')}
           </label>
           <span className="text-zinc-400">{t('{count} selected', { count: selectedJobs.length })}</span>
+          <SelectionScope
+            items={selectedJobs.map((job) => ({ key: job.id, label: job.title || job.url }))}
+            visible={shown.map((job) => job.id)}
+            disabled={busy}
+            onClear={() => setSelected(new Set())}
+            onRemove={(id) => setSelected((previous) => new Set([...previous].filter((item) => item !== id)))}
+          />
           <Button
             disabled={busy || !selectedJobs.some((job) => ['queued', 'running'].includes(job.status))}
             onClick={() => runBatch('cancel')}
@@ -232,9 +245,9 @@ export function QueuePanel({
           {t('No downloads match.')}
         </p>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid min-w-0 grid-cols-1 gap-3">
           {shown.map((job) => (
-            <div key={job.id} className="grid gap-1">
+            <div key={job.id} className="grid min-w-0 grid-cols-1 gap-1">
               <div className="flex items-center gap-2 text-xs text-zinc-400">
                 <label className="flex min-w-0 flex-1 items-center gap-2">
                   <input

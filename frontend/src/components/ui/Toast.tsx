@@ -10,6 +10,7 @@ export function Toasts({ items, onRemove }: { items: ToastItem[]; onRemove: (id:
       role="status"
       aria-live="polite"
       className="fixed bottom-5 right-5 z-[60] flex max-h-[50vh] w-[min(380px,calc(100vw-2rem))] flex-col gap-2 overflow-y-auto"
+      style={{ bottom: 'calc(var(--audio-toast-offset, 0px) + 1.25rem)' }}
     >
       {items.map((item) => (
         <ToastMessage key={item.id} item={item} onRemove={() => onRemove(item.id)} />
@@ -36,7 +37,7 @@ function ToastMessage({ item, onRemove }: { item: ToastItem; onRemove: () => voi
   }
   return (
     <div
-      className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm shadow-xl backdrop-blur ${item.error ? 'border-red-400/20 bg-red-950/70 text-red-100' : 'border-white/10 bg-[#16191f]/90 text-zinc-100'}`}
+      className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm shadow-xl backdrop-blur ${item.error ? 'border-red-400/20 bg-error-surface/95 text-red-100' : 'border-white/10 bg-toast/95 text-zinc-100'}`}
     >
       <div className="flex-1">
         <p>{item.message}</p>

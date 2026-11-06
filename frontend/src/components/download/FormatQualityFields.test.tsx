@@ -2,12 +2,42 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { FormatQualityFields } from './FormatQualityFields'
+import { useState } from 'react'
+import type { DownloadMode } from '../../types/api'
 
 const video = { mode: 'mp4' as const, quality: 'best', abr: 192 }
 const optionValues = (select: HTMLElement) =>
   [...select.querySelectorAll('option')].map((o) => o.getAttribute('value'))
 
 describe('FormatQualityFields', () => {
+  it('reveals relevant formats and remembers source audio when switching categories', async () => {
+    function Fields() {
+      const [options, setOptions] = useState<{ mode: DownloadMode; quality: string; abr: number }>({
+        ...video,
+        abr: 256,
+      })
+      return (
+        <FormatQualityFields
+          options={options}
+          allowImages
+          onChange={(patch) => setOptions((current) => ({ ...current, ...patch }))}
+        />
+      )
+    }
+    const user = userEvent.setup()
+    render(<Fields />)
+    expect(screen.queryByRole('radio', { name: 'MP3 audio' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('radio', { name: 'Audio' }))
+    expect(screen.getByLabelText('Audio quality')).toHaveValue('256')
+    await user.click(screen.getByRole('radio', { name: 'Keep source audio' }))
+    await user.click(screen.getByRole('radio', { name: 'Images' }))
+    expect(screen.queryByRole('radio', { name: 'MP3 audio' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('radio', { name: 'Direct image' }))
+    await user.click(screen.getByRole('radio', { name: 'Audio' }))
+    expect(screen.getByRole('radio', { name: 'Keep source audio' })).toHaveAttribute('aria-checked', 'true')
+    await user.click(screen.getByRole('radio', { name: 'Images' }))
+    expect(screen.getByRole('radio', { name: 'Direct image' })).toHaveAttribute('aria-checked', 'true')
+  })
   it('offers the usual resolutions when nothing was analyzed (what a subscription uses)', () => {
     render(<FormatQualityFields options={video} onChange={() => {}} />)
     const select = screen.getByLabelText(/maximum video quality/i)
@@ -60,7 +90,7 @@ describe('FormatQualityFields', () => {
   it('reports changes as partial patches', async () => {
     const onChange = vi.fn()
     render(<FormatQualityFields options={video} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('radio', { name: 'MP3 audio' }))
+    await userEvent.click(screen.getByRole('radio', { name: 'Audio' }))
     expect(onChange).toHaveBeenLastCalledWith({ mode: 'mp3' })
     await userEvent.selectOptions(screen.getByLabelText(/maximum video quality/i), '720')
     expect(onChange).toHaveBeenLastCalledWith({ quality: '720' })

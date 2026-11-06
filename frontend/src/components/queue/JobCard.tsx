@@ -163,7 +163,7 @@ export function JobCard({ job, windowMode, onChanged, onToast, onHelp }: Props) 
 
   return (
     <article
-      className="relative overflow-hidden rounded-2xl border border-white/[.07] bg-white/[.02]"
+      className="relative min-w-0 overflow-hidden rounded-2xl border border-white/[.07] bg-white/[.02]"
       aria-label={job.title || job.url}
     >
       <div
@@ -178,7 +178,7 @@ export function JobCard({ job, windowMode, onChanged, onToast, onHelp }: Props) 
         )}
         style={{ width: `${fullBar ? 100 : percent}%` }}
       />
-      <div className="relative grid gap-3 p-4">
+      <div className="relative grid min-w-0 grid-cols-1 gap-3 p-4">
         <div className="flex items-start gap-3">
           <div
             aria-hidden
@@ -193,12 +193,12 @@ export function JobCard({ job, windowMode, onChanged, onToast, onHelp }: Props) 
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-sm font-medium" title={job.url}>
+            <h3 className="truncate text-sm font-medium" title={job.title || job.url}>
               {job.title || job.url}
             </h3>
-            <p className="mt-0.5 text-xs text-zinc-400">{meta.join(' · ')}</p>
+            <p className="mt-0.5 break-words text-xs text-zinc-400">{meta.join(' · ')}</p>
           </div>
-          <div className="text-right">
+          <div className="shrink-0 text-right">
             <div
               className={cn(
                 'text-xl font-semibold tabular-nums',
@@ -275,11 +275,11 @@ export function JobCard({ job, windowMode, onChanged, onToast, onHelp }: Props) 
         )}
 
         {job.files.length > 0 && (
-          <ul className="grid gap-1">
+          <ul className="grid min-w-0 grid-cols-1 gap-1">
             {job.files.map((file) => (
-              <li key={file.path} className="flex items-center gap-2 text-sm">
+              <li key={file.path} className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
                 <span
-                  className={`min-w-0 flex-1 truncate ${file.complete === false ? 'text-amber-300' : 'text-emerald-300'}`}
+                  className={`min-w-0 flex-1 basis-40 truncate ${file.complete === false ? 'text-amber-300' : 'text-emerald-300'}`}
                   title={file.name}
                 >
                   {displayFilename(file.name)}

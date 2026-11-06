@@ -23,6 +23,12 @@ const job: Job = {
 }
 afterEach(() => vi.unstubAllGlobals())
 
+it('keeps the full long title in the title tooltip', () => {
+  const title = 'Long video title #收藏 #music '.repeat(30)
+  render(<JobCard job={{ ...job, title }} windowMode={false} onChanged={() => {}} onToast={() => {}} />)
+  expect(screen.getByRole('heading', { name: title.trim() })).toHaveAttribute('title', title)
+})
+
 it('shows a plain error and opens setup help without exposing raw errors', async () => {
   const user = userEvent.setup()
   const help = vi.fn()

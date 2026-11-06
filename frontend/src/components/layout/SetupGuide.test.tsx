@@ -64,9 +64,9 @@ it('prepares only after the user clicks and keeps failed preparation actionable'
     />,
   )
   expect(prepare).not.toHaveBeenCalled()
-  await user.click(screen.getByRole('button', { name: 'Prepare download features' }))
+  await user.click(await screen.findByRole('button', { name: 'Prepare download features' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('Preparation failed')
-  expect(screen.getByRole('button', { name: 'Prepare download features' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: 'Try preparation again' })).toBeEnabled()
 })
 
 it('explains Windows blocking without suggesting an automatic bypass', async () => {
@@ -89,4 +89,57 @@ it('explains Windows blocking without suggesting an automatic bypass', async () 
   expect(screen.queryByRole('button', { name: 'Prepare download features' })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Technical details' })).toBeEnabled()
   await waitFor(() => expect(screen.getByRole('button', { name: 'Download images for now' })).toBeEnabled())
+})
+
+it.each([
+  ['media', 'Preparing video and audio tools…'],
+  ['sites', 'Preparing website support…'],
+  ['verifying', 'Making sure everything works…'],
+])('shows the current preparation stage (%s) and keeps actions disabled', async (stage, label) => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify({ can_install: true, ready: false }))),
+  )
+  const close = vi.fn()
+  render(
+    <SetupGuide
+      open
+      doctor={missing}
+      preparing
+      preparationStage={stage}
+      onClose={close}
+      onDiagnostics={vi.fn()}
+      onStart={vi.fn()}
+      onPrepare={vi.fn()}
+    />,
+  )
+  expect(screen.getByRole('list', { name: 'Getting started steps' })).toBeInTheDocument()
+  expect(screen.getByText(label)).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: 'Preparing…' })).toBeDisabled()
+  await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+  expect(close).not.toHaveBeenCalled()
+})
+
+it('lets users recheck a failed readiness request before installing anything', async () => {
+  const fetch = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValue(new Response(JSON.stringify({ can_install: true, ready: false })))
+  vi.stubGlobal('fetch', fetch)
+  const prepare = vi.fn()
+  render(
+    <SetupGuide
+      open
+      doctor={missing}
+      onClose={vi.fn()}
+      onDiagnostics={vi.fn()}
+      onStart={vi.fn()}
+      onPrepare={prepare}
+    />,
+  )
+  expect(await screen.findByRole('button', { name: 'Check again' })).toBeEnabled()
+  expect(screen.queryByRole('button', { name: 'Prepare download features' })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+  expect(await screen.findByRole('button', { name: 'Prepare download features' })).toBeEnabled()
+  expect(prepare).not.toHaveBeenCalled()
 })

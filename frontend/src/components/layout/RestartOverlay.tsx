@@ -6,7 +6,7 @@ export function RestartOverlay({ windowMode }: { windowMode: boolean }) {
   return (
     <div
       role="alert"
-      className="fixed inset-0 z-[70] grid place-items-center bg-black/80 p-6 text-center backdrop-blur"
+      className="fixed inset-0 z-[70] grid place-items-center bg-canvas/95 p-6 text-center backdrop-blur"
     >
       <div>
         <Loader2 className="mx-auto mb-4 animate-spin" size={30} />

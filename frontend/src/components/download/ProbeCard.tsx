@@ -207,7 +207,7 @@ export function ProbeCard({
                   aria-pressed={selected}
                   onClick={() => onPickQuality(String(h))}
                   className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
-                    selected ? 'bg-white text-black' : 'bg-white/[.06] text-zinc-300 hover:bg-white/[.1]'
+                    selected ? 'bg-white text-zinc-950' : 'bg-white/[.06] text-zinc-300 hover:bg-white/[.1]'
                   }`}
                 >
                   {selected && <Check aria-hidden size={12} />} {h}p

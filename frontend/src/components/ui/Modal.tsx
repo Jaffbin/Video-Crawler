@@ -66,7 +66,7 @@ export function Modal({ open, title, onClose, children, wide = false }: Props) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`w-full ${wide ? 'max-w-3xl' : 'max-w-xl'} overflow-hidden rounded-2xl border border-white/10 bg-[#111318] shadow-2xl outline-none`}
+        className={`w-full ${wide ? 'max-w-3xl' : 'max-w-xl'} overflow-hidden rounded-2xl border border-white/10 bg-panel shadow-2xl outline-none`}
       >
         <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
           <h2 id={titleId} className="font-semibold">

@@ -13,8 +13,12 @@ import type {
   UpdateStatus,
   YtdlpCheck,
   RecoveryFile,
+  SmartRules,
+  LibraryCheck,
+  LibraryBatchResult,
 } from '../types/api'
 import { sanitizeOptions } from '../lib/options'
+import type { BrowserPreferences, BackupReview } from '../lib/backup'
 
 const PLACEHOLDER = '__GRAB_TOKEN__'
 let cachedToken: string | null = null
@@ -63,11 +67,29 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 const post = <T>(path: string, body: unknown = {}) =>
   api<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
+export const exportBackup = (preferences: BrowserPreferences) =>
+  post<unknown>('/api/backup/export', { preferences })
+export const previewBackup = (backup: unknown, current: BrowserPreferences) =>
+  post<BackupReview>('/api/backup/preview', { backup, current })
+export const restoreBackup = (backup: unknown, current: BrowserPreferences, review_token: string) =>
+  post<BackupReview>('/api/backup/restore', { backup, current, review_token })
+
 export const getState = (rev: number) => api<StateResponse>(`/api/state?rev=${rev}`)
 export const probe = (url: string, options: DownloadOptions) =>
   post<ProbeResult>('/api/probe', { url, options: sanitizeOptions(options) })
-export const createJobs = (urls: string[], options: DownloadOptions) =>
-  post<{ ids: string[]; duplicates?: number }>('/api/jobs', { urls, options: sanitizeOptions(options) })
+export interface ExistingDownload {
+  settings_match?: boolean
+  profile?: { mode?: string; quality?: string; abr?: number }
+  url: string
+  path: string
+  name: string
+  profile_known: boolean
+}
+export const createJobs = (urls: string[], options: DownloadOptions, existingAction?: 'skip' | 'download') =>
+  post<{ ids: string[]; duplicates?: number; existing?: ExistingDownload[]; skipped_existing?: number }>(
+    '/api/jobs',
+    { urls, options: sanitizeOptions(options), check_existing: true, existing_action: existingAction },
+  )
 export const jobAction = (id: string, action: 'cancel' | 'retry' | 'remove') =>
   post<{ ok?: boolean; ids?: string[]; duplicates?: boolean }>(`/api/jobs/${id}/${action}`)
 export const clearJobs = () => post<{ ok: boolean }>('/api/clear')
@@ -89,6 +111,61 @@ export const organizeFiles = (
   })
 export const changeCollection = (action: 'create' | 'rename' | 'delete', name?: string, id?: string) =>
   post<{ id: string }>('/api/library/collections', { action, name, id })
+export const changeSmartCollection = (
+  action: 'create' | 'update' | 'delete',
+  name?: string,
+  id?: string,
+  rules?: SmartRules,
+) => post<{ id: string }>('/api/library/smart-collections', { action, name, id, rules })
+export const getLibraryCheck = () => api<LibraryCheck>('/api/library/organizer')
+export const libraryCheckAction = (action: 'start' | 'cancel') =>
+  post<LibraryCheck>('/api/library/organizer', { action })
+export const recycleCheckedDuplicates = (scan_id: string, items: string[]) =>
+  post<LibraryBatchResult>('/api/library/organizer/recycle', { scan_id, items })
+export const saveFileDetails = (path: string, tags: string[], note: string) =>
+  post<{ ok: boolean }>('/api/library/details', { path, tags, note })
+export const savePlayback = (path: string, position: number, duration: number, root?: string) =>
+  api<{ ok: boolean }>('/api/library/playback', {
+    method: 'POST',
+    keepalive: true,
+    body: JSON.stringify({ path, position, duration, root }),
+  })
+
+export function importLibraryFile(file: File, signal: AbortSignal, onProgress: (percent: number) => void) {
+  return new Promise<{ path: string; duplicate: boolean }>((resolve, reject) => {
+    const request = new XMLHttpRequest()
+    const cancel = () => request.abort()
+    const finish = () => signal.removeEventListener('abort', cancel)
+    request.open('POST', `/api/library/import?name=${encodeURIComponent(file.name)}`)
+    request.setRequestHeader('X-Token', getToken())
+    request.setRequestHeader('Content-Type', 'application/octet-stream')
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100))
+    }
+    request.onload = () => {
+      finish()
+      try {
+        const body = JSON.parse(request.responseText)
+        if (request.status < 200 || request.status >= 300)
+          throw new Error(body.error || 'Could not import this file.')
+        resolve(body)
+      } catch (error) {
+        reject(error)
+      }
+    }
+    request.onerror = () => {
+      finish()
+      reject(new Error('Could not import this file. Please try again.'))
+    }
+    request.onabort = () => {
+      finish()
+      reject(new DOMException('Import canceled', 'AbortError'))
+    }
+    if (signal.aborted) return reject(new DOMException('Import canceled', 'AbortError'))
+    signal.addEventListener('abort', cancel, { once: true })
+    request.send(file)
+  })
+}
 export const getRecoveryFiles = () => api<{ items: RecoveryFile[] }>('/api/library/trash')
 export const restoreFile = (id: string) => post<{ path: string }>('/api/library/restore', { id })
 export const purgeFile = (id: string) => post<{ ok: boolean }>('/api/library/purge', { id })
@@ -137,6 +214,8 @@ export const restart = () => post<{ ok: boolean }>('/api/restart')
 /** Asks the backend to show a native OS notification (window mode only; see StateResponse.desktop_notifications). */
 export const notifyDesktop = (title: string, body: string) =>
   post<{ ok: boolean }>('/api/notify', { title, body })
+export const setNativeNotifications = (enabled: boolean) =>
+  post<{ ok: boolean }>('/api/desktop/notifications', { enabled })
 
 export const getSubscriptions = () => api<SubscriptionsResponse>('/api/subscriptions')
 export const addSubscription = (

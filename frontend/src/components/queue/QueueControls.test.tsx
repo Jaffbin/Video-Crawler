@@ -25,6 +25,17 @@ const jobs: Job[] = [
 ]
 afterEach(() => vi.unstubAllGlobals())
 
+it('keeps filtered-out task selections visible for review and clearing', async () => {
+  const user = userEvent.setup()
+  render(<QueuePanel jobs={jobs} windowMode={false} onChanged={vi.fn()} onToast={vi.fn()} />)
+  await user.click(screen.getByRole('checkbox', { name: 'Select visible' }))
+  await user.type(screen.getByRole('searchbox', { name: 'Search downloads' }), 'absent')
+  expect(screen.getByText('1 selected outside this view')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'View selected' })).toBeEnabled()
+  await user.click(screen.getByRole('button', { name: 'Clear selection' }))
+  expect(screen.queryByRole('button', { name: 'View selected' })).not.toBeInTheDocument()
+})
+
 it('labels unfinished output separately from completed output in a failed job', () => {
   render(
     <QueuePanel

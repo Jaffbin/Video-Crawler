@@ -54,6 +54,44 @@ afterEach(() => {
 })
 
 describe('App', () => {
+  it('toggles native completion notifications without requesting browser permission', async () => {
+    let enabled = true
+    const permission = vi.fn()
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission: permission })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url === '/api/desktop/notifications') enabled = JSON.parse(String(init?.body)).enabled
+        return new Response(
+          JSON.stringify(
+            url.startsWith('/api/state')
+              ? { ...baseState, window: true, native_notifications: { enabled, available: true } }
+              : url.startsWith('/api/subscriptions')
+                ? { subscriptions: [], interval_seconds: 3600 }
+                : url.startsWith('/api/doctor')
+                  ? { checks: [], report: '' }
+                  : { ok: true },
+          ),
+          { status: 200 },
+        )
+      }),
+    )
+    localStorage.setItem('grab-setup-seen', '1')
+    const user = (await import('@testing-library/user-event')).default.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Turn off completion notifications' }))
+    expect(await screen.findByRole('button', { name: 'Turn on completion notifications' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+    await user.click(screen.getByRole('button', { name: 'Turn on completion notifications' }))
+    expect(await screen.findByRole('button', { name: 'Turn off completion notifications' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(permission).not.toHaveBeenCalled()
+  })
   it('offers setup once for an empty installation and remembers dismissal', async () => {
     mockApi()
     const user = (await import('@testing-library/user-event')).default.setup()
@@ -76,6 +114,8 @@ describe('App', () => {
     const user = (await import('@testing-library/user-event')).default.setup()
     render(<App />)
 
+    expect(await screen.findByRole('heading', { name: 'Downloaded files' })).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: 'New download' })[0])
     expect(await screen.findByRole('textbox', { name: /links to download/i })).toBeInTheDocument()
     const queueLinks = screen.getAllByRole('button', { name: 'Queue' })
     await user.click(queueLinks[0])
@@ -106,6 +146,8 @@ describe('App', () => {
     // e.g. the user copied a link and hits Ctrl+V without clicking into the box first.
     mockApi()
     render(<App />)
+    const user = (await import('@testing-library/user-event')).default.setup()
+    await user.click(screen.getAllByRole('button', { name: 'New download' })[0])
     const box = await screen.findByRole('textbox', { name: /links to download/i })
     document.body.focus()
     const event = Object.assign(new Event('paste', { bubbles: true, cancelable: true }), {

@@ -2,16 +2,17 @@ import {
   CircleHelp,
   Download,
   FolderOpen,
+  Languages,
   Library,
   ListVideo,
-  RefreshCw,
-  Stethoscope,
+  Power,
+  Settings,
   TimerReset,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { AppView } from '../../hooks/useNavigation'
 import { cn } from '../../lib/utils'
-import { LOCALES, useI18n } from '../../i18n'
+import { useI18n } from '../../i18n'
 
 interface Props {
   view: AppView
@@ -23,10 +24,11 @@ interface Props {
   updateAttention: boolean
   environmentAttention: boolean
   onNavigate: (view: AppView) => void
-  onDoctor: () => void
+  onTools: () => void
   onSetup: () => void
-  onUpdate: () => void
   onOpenFolder: () => void
+  onLanguage: (button: HTMLElement) => void
+  onCloseBehavior?: () => void
 }
 
 interface NavItem {
@@ -58,7 +60,7 @@ function NavButton({ item, selected, onSelect }: { item: NavItem; selected: bool
           className={cn(
             'min-w-6 rounded-full px-1.5 py-0.5 text-center text-[11px] font-semibold',
             selected
-              ? 'bg-black/10 text-zinc-800'
+              ? 'bg-zinc-950/10 text-zinc-800'
               : item.bad
                 ? 'bg-red-500/15 text-red-300'
                 : 'bg-white/[.08]',
@@ -76,17 +78,20 @@ function ToolButton({
   label,
   attention,
   onClick,
+  popup,
 }: {
   icon: LucideIcon
   label: string
   attention?: boolean
-  onClick: () => void
+  onClick: (button: HTMLButtonElement) => void
+  popup?: boolean
 }) {
   const { t } = useI18n()
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(event) => onClick(event.currentTarget)}
+      aria-haspopup={popup ? 'dialog' : undefined}
       className="relative flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/[.06] hover:text-zinc-100"
     >
       <Icon size={17} aria-hidden />
@@ -99,7 +104,7 @@ function ToolButton({
 }
 
 export function Sidebar(p: Props) {
-  const { locale, setLocale, t } = useI18n()
+  const { t } = useI18n()
   const items: NavItem[] = [
     { id: 'new', label: t('New download'), shortLabel: t('New'), icon: Download },
     {
@@ -116,11 +121,11 @@ export function Sidebar(p: Props) {
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-white/[.06] bg-[#0b0d10] px-3 py-4 md:flex">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col overflow-y-auto border-r border-white/[.06] bg-canvas px-3 py-4 lg:flex">
         <div className="mb-6 flex items-center gap-3 px-2">
           <div
             aria-hidden
-            className="grid size-9 shrink-0 place-items-center rounded-xl bg-white font-black text-black"
+            className="grid size-9 shrink-0 place-items-center rounded-xl bg-white font-black text-zinc-950"
           >
             ↓
           </div>
@@ -147,41 +152,25 @@ export function Sidebar(p: Props) {
           ))}
         </nav>
 
-        <div className="mt-auto grid gap-1 border-t border-white/[.06] pt-3">
+        <div className="compact-actions sidebar-tools mt-auto grid gap-1 border-t border-white/[.06] pt-3">
           <ToolButton icon={CircleHelp} label={t('Getting started')} onClick={p.onSetup} />
-          <label className="grid gap-1 px-3 pb-2 text-xs text-zinc-500">
-            <span>{t('Language')}</span>
-            <select
-              className="field !py-1.5"
-              value={locale}
-              onChange={(e) => setLocale(e.target.value as typeof locale)}
-            >
-              {LOCALES.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <ToolButton
-            icon={Stethoscope}
-            label={t('Diagnostics')}
-            attention={p.environmentAttention}
-            onClick={p.onDoctor}
-          />
-          <ToolButton
-            icon={RefreshCw}
-            label={t('Updates')}
-            attention={p.updateAttention}
-            onClick={p.onUpdate}
-          />
           <ToolButton icon={FolderOpen} label={t('Open folder')} onClick={p.onOpenFolder} />
+          <ToolButton icon={Languages} label={t('Language')} onClick={p.onLanguage} popup />
+          <ToolButton
+            icon={Settings}
+            label={t('Settings and help')}
+            attention={p.environmentAttention || p.updateAttention}
+            onClick={p.onTools}
+          />
+          {p.onCloseBehavior && (
+            <ToolButton icon={Power} label={t('Close behavior')} onClick={p.onCloseBehavior} />
+          )}
         </div>
       </aside>
 
       <nav
         aria-label={t('Main navigation')}
-        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-white/[.08] bg-[#0b0d10]/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-white/[.08] bg-canvas/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden"
       >
         {items.map((item) => {
           const Icon = item.icon
@@ -206,8 +195,8 @@ export function Sidebar(p: Props) {
                     selected
                       ? 'bg-zinc-300 text-zinc-950'
                       : item.bad
-                        ? 'bg-red-500 text-white'
-                        : 'bg-zinc-700 text-white',
+                        ? 'bg-red-500 text-[#fff]'
+                        : 'bg-zinc-700 text-zinc-100',
                   )}
                 >
                   {item.count > 99 ? '99+' : item.count}

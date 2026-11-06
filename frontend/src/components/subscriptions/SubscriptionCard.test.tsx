@@ -93,7 +93,7 @@ describe('SubscriptionCard', () => {
       </ul>,
     )
     await userEvent.click(screen.getByRole('button', { name: /edit format/i }))
-    await userEvent.click(screen.getByRole('radio', { name: 'MP3 audio' }))
+    await userEvent.click(screen.getByRole('radio', { name: 'Audio' }))
     await userEvent.selectOptions(screen.getByLabelText(/audio quality/i), '320')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 

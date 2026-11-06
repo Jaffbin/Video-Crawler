@@ -1,5 +1,6 @@
+import { useRef } from 'react'
 import { audioQualityLabel } from '../../lib/options'
-import type { DownloadOptions } from '../../types/api'
+import type { DownloadMode, DownloadOptions } from '../../types/api'
 import { Segmented } from '../ui/Segmented'
 import { useI18n } from '../../i18n'
 
@@ -30,6 +31,16 @@ export function FormatQualityFields({
   allowImages = false,
 }: Props) {
   const { t } = useI18n()
+  const lastAudio = useRef<DownloadMode>('mp3')
+  const lastImage = useRef<DownloadMode>('cover')
+  if (options.mode === 'mp3' || options.mode === 'original') lastAudio.current = options.mode
+  if (options.mode === 'cover' || options.mode === 'image') lastImage.current = options.mode
+  const category =
+    options.mode === 'mp4'
+      ? 'video'
+      : options.mode === 'mp3' || options.mode === 'original'
+        ? 'audio'
+        : 'image'
   const mp3 = options.mode === 'mp3'
   const heights = analyzed ? availableHeights : FALLBACK_HEIGHTS
   // A saved quality that the list does not offer (say 1080 after analyzing a 720p-only video) stays selectable.
@@ -37,33 +48,53 @@ export function FormatQualityFields({
   const extra = options.quality !== 'best' && Number.isFinite(savedQuality) && !heights.includes(savedQuality)
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="control sm:col-span-2">
-        <span>{t('Format')}</span>
+    <div className="grid min-w-0 gap-3">
+      <div className="control">
+        <span>{t('Download type')}</span>
         <Segmented
           wrap
-          label={t('Output format')}
-          value={options.mode}
-          onChange={(mode) => onChange({ mode })}
+          label={t('Download type')}
+          value={category}
+          onChange={(value) =>
+            onChange({
+              mode: value === 'video' ? 'mp4' : value === 'audio' ? lastAudio.current : lastImage.current,
+            })
+          }
           options={[
-            { value: 'mp4', label: t('MP4 video') },
-            { value: 'mp3', label: t('MP3 audio') },
-            { value: 'original', label: t('Keep source audio') },
-            ...(allowImages
-              ? [
-                  { value: 'cover' as const, label: t('Video cover') },
-                  { value: 'image' as const, label: t('Direct image') },
-                ]
-              : []),
+            { value: 'video', label: t('Video') },
+            { value: 'audio', label: t('Audio') },
+            ...(allowImages ? [{ value: 'image' as const, label: t('Images') }] : []),
           ]}
         />
       </div>
+      {category !== 'video' && (
+        <div className="control">
+          <span>{t(category === 'audio' ? 'Audio format' : 'Image source')}</span>
+          <Segmented
+            wrap
+            label={t('Output format')}
+            value={options.mode}
+            onChange={(mode) => onChange({ mode })}
+            options={[
+              ...(category === 'audio'
+                ? [
+                    { value: 'mp3' as const, label: t('MP3 audio') },
+                    { value: 'original' as const, label: t('Keep source audio') },
+                  ]
+                : [
+                    { value: 'cover' as const, label: t('Video cover') },
+                    { value: 'image' as const, label: t('Direct image') },
+                  ]),
+            ]}
+          />
+        </div>
+      )}
       {options.mode === 'cover' || options.mode === 'image' ? (
         <p className="self-center text-xs text-zinc-400">
           {t('Save the original image format. No ffmpeg conversion is needed.')}
         </p>
       ) : options.mode === 'original' ? (
-        <div className="grid gap-1 text-xs text-zinc-400 sm:col-span-2">
+        <div className="grid gap-1 text-xs text-zinc-400">
           <p className="text-sm text-zinc-200">{t('Best available audio · no re-encoding')}</p>
           <p>
             {t(
@@ -73,7 +104,7 @@ export function FormatQualityFields({
           <p>{t('This preserves the audio offered by the site, not necessarily the original recording.')}</p>
         </div>
       ) : mp3 ? (
-        <div className="grid gap-2 sm:col-span-2">
+        <div className="grid gap-2">
           <label className="control">
             <span>{t('Audio quality')}</span>
             <select
