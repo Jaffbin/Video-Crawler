@@ -1,0 +1,91 @@
+{
+  "sendPage": { "message": "このページを Video Grabber に送信…" },
+  "sendLink": { "message": "このリンクを Video Grabber に送信…" },
+  "selectedLink": { "message": "選択したリンク" },
+  "selectionExpired": {
+    "message": "選択が期限切れか、すでに開かれました。ページやリンクを右クリックして選び直してください。"
+  },
+  "shortcutHint": { "message": "ショートカット：$1" },
+  "shortcutNotAssigned": { "message": "ショートカット未設定" },
+  "changeShortcut": { "message": "キーを変更" },
+  "shortcutSettingsUnavailable": {
+    "message": "chrome://extensions/shortcuts でキーを変更してください。"
+  },
+  "existingHint": {
+    "message": "保存済みファイルがあります。ライブラリで形式と画質を確認してください。別のコピーは元のファイルを保持します。"
+  },
+  "useExisting": { "message": "既存のファイルを使う" },
+  "downloadCopy": { "message": "別のコピーをダウンロード" },
+  "openLibrary": { "message": "ライブラリを開く" },
+  "cancelExisting": { "message": "キャンセル" },
+  "extensionName": { "message": "Video Grabber — Chrome から保存" },
+  "extensionDescription": {
+    "message": "現在の動画や音楽のページをローカルの Video Grabber キューに送信します。"
+  },
+  "reconnect": { "message": "再接続" },
+  "pageUrl": { "message": "現在のページのリンク" },
+  "output": { "message": "保存形式" },
+  "video": { "message": "動画（MP4）" },
+  "mp3": { "message": "音声（MP3）" },
+  "sourceAudio": { "message": "元の音声を保持" },
+  "quality": { "message": "動画の最高画質" },
+  "best": { "message": "利用可能な最高画質" },
+  "audioQuality": { "message": "音質" },
+  "highAudio": { "message": "最高音質 · 320 kbps" },
+  "standardAudio": { "message": "標準 · 192 kbps" },
+  "smallAudio": { "message": "容量を節約 · 128 kbps" },
+  "sourceHint": {
+    "message": "利用可能な最高品質の元音声を再エンコードせずに保存します。形式は配信元により異なります。"
+  },
+  "saveTo": { "message": "保存先" },
+  "connecting": { "message": "ローカルアプリに接続中…" },
+  "connected": { "message": "Video Grabber に接続済み" },
+  "multipleApps": {
+    "message": "複数のアプリが見つかりました。保存先を確認してください。"
+  },
+  "chooseApp": { "message": "保存先フォルダーを選択" },
+  "connectionSettings": { "message": "接続設定" },
+  "port": { "message": "アプリのカスタムポート（任意）" },
+  "connect": { "message": "接続" },
+  "singleItem": {
+    "message": "単一アイテムのみ。プレイリスト・字幕なし。動画のサイトカバーは利用可能な場合に保存します。"
+  },
+  "download": { "message": "キューに追加" },
+  "viewQueue": { "message": "キューを表示" },
+  "currentPage": { "message": "現在のページ" },
+  "openApp": {
+    "message": "このパソコンで Video Grabber を開き、再接続をクリックしてください。"
+  },
+  "unsupportedPage": {
+    "message": "HTTP または HTTPS の動画や音楽のページに切り替え、拡張機能を開き直してください。"
+  },
+  "invalidPort": { "message": "1～65535 のポート番号を入力してください。" },
+  "invalidConnection": {
+    "message": "127.0.0.1 のローカルアプリにのみ接続できます。"
+  },
+  "invalidFormat": { "message": "動画・MP3・元の音声を選択してください。" },
+  "invalidRequest": { "message": "拡張機能を開き直して再試行してください。" },
+  "notOurApp": {
+    "message": "このアドレスから有効な Video Grabber が応答しませんでした。"
+  },
+  "appUnavailable": {
+    "message": "接続できません。Video Grabber を開いて再接続してください。"
+  },
+  "downloadUnconfirmed": {
+    "message": "追加を確認できませんでした。再試行前にアプリのキューを確認してください。"
+  },
+  "downloadFailed": {
+    "message": "アプリがダウンロードを追加できませんでした。"
+  },
+  "openQueueFailed": {
+    "message": "キューを開けません。アプリのトレイメニューから再試行してください。"
+  },
+  "added": { "message": "アプリのキューに追加しました。閲覧を続けられます。" },
+  "duplicate": { "message": "このダウンロードは既にキューにあります。" },
+  "settingsNotSaved": {
+    "message": "選択内容を保存できませんでしたが、拡張機能は使用できます。"
+  },
+  "destinationChanged": {
+    "message": "アプリの保存先が変更されました。再接続して保存先を確認してからダウンロードしてください。"
+  }
+}

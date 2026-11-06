@@ -1,0 +1,89 @@
+{
+  "sendPage": { "message": "Send this page to Video Grabber…" },
+  "sendLink": { "message": "Send this link to Video Grabber…" },
+  "selectedLink": { "message": "Selected link" },
+  "selectionExpired": {
+    "message": "This selection expired or was already opened. Right-click the page or link again."
+  },
+  "shortcutHint": { "message": "Shortcut: $1" },
+  "shortcutNotAssigned": { "message": "No shortcut assigned" },
+  "changeShortcut": { "message": "Change shortcut" },
+  "shortcutSettingsUnavailable": {
+    "message": "Open chrome://extensions/shortcuts to change the shortcut."
+  },
+  "existingHint": {
+    "message": "Saved files were found. Check format and quality in Library before choosing. Another copy keeps the originals."
+  },
+  "useExisting": { "message": "Use existing files" },
+  "downloadCopy": { "message": "Download another copy" },
+  "openLibrary": { "message": "Open Library" },
+  "cancelExisting": { "message": "Cancel" },
+  "extensionName": { "message": "Video Grabber — Save from Chrome" },
+  "extensionDescription": {
+    "message": "Send the current video or music page to your local Video Grabber queue."
+  },
+  "reconnect": { "message": "Reconnect" },
+  "pageUrl": { "message": "Current page link" },
+  "output": { "message": "Save as" },
+  "video": { "message": "Video (MP4)" },
+  "mp3": { "message": "Audio (MP3)" },
+  "sourceAudio": { "message": "Keep source audio" },
+  "quality": { "message": "Maximum video quality" },
+  "best": { "message": "Best available" },
+  "audioQuality": { "message": "Audio quality" },
+  "highAudio": { "message": "Highest quality · 320 kbps" },
+  "standardAudio": { "message": "Standard · 192 kbps" },
+  "smallAudio": { "message": "Save space · 128 kbps" },
+  "sourceHint": {
+    "message": "Best available source audio, without re-encoding. The source determines the format."
+  },
+  "saveTo": { "message": "Save to" },
+  "connecting": { "message": "Connecting to the local app…" },
+  "connected": { "message": "Connected to Video Grabber" },
+  "multipleApps": {
+    "message": "Multiple apps found. Check the save folder before downloading."
+  },
+  "chooseApp": { "message": "Choose the save folder" },
+  "connectionSettings": { "message": "Connection settings" },
+  "port": { "message": "Custom app port (optional)" },
+  "connect": { "message": "Connect" },
+  "singleItem": {
+    "message": "Single item only. No playlist or subtitles. Video covers saved when available."
+  },
+  "download": { "message": "Add to queue" },
+  "viewQueue": { "message": "View queue" },
+  "currentPage": { "message": "Current page" },
+  "openApp": {
+    "message": "Open Video Grabber on this computer, then click Reconnect."
+  },
+  "unsupportedPage": {
+    "message": "Switch to an HTTP or HTTPS video or music page, then open this extension again."
+  },
+  "invalidPort": { "message": "Enter a port between 1 and 65535." },
+  "invalidConnection": {
+    "message": "Only the local app at 127.0.0.1 can be connected."
+  },
+  "invalidFormat": { "message": "Choose video, MP3 or source audio." },
+  "invalidRequest": { "message": "Reopen the extension and try again." },
+  "notOurApp": {
+    "message": "This address did not return a valid Video Grabber app."
+  },
+  "appUnavailable": {
+    "message": "Cannot connect. Open Video Grabber and click Reconnect."
+  },
+  "downloadUnconfirmed": {
+    "message": "Could not confirm the download. Check the app queue before trying again."
+  },
+  "downloadFailed": { "message": "The app could not add this download." },
+  "openQueueFailed": {
+    "message": "Could not open the queue. Use the app's tray menu."
+  },
+  "added": { "message": "Added to the app queue. You can keep browsing." },
+  "duplicate": { "message": "This download is already in the queue." },
+  "settingsNotSaved": {
+    "message": "Could not remember your choices. You can still use the extension."
+  },
+  "destinationChanged": {
+    "message": "The app's save folder changed. Click Reconnect and confirm the folder before downloading."
+  }
+}

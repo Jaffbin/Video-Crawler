@@ -30,10 +30,20 @@ batch controls, and reversible file management.
   Rename files or move them to recoverable local storage together with matching subtitles and covers.
 - Select Library files in batches; restore or permanently delete Recovery selections with confirmation.
 - Favorite files and organize them in multiple virtual collections, with individual and batch controls.
+- Use built-in or custom smart collections that automatically match saved-date, type, source, format,
+  tag, favorite and playback conditions; custom rules persist and are included in library backups.
+- Import local media without moving the originals; repeated imports are detected by content.
+- Browse cover cards or a list, preview media inside Library, and resume supported audio/video.
+- Play local audio continuously in a persistent bottom bar, with a reorderable playback queue,
+  repeat/shuffle, speed, seeking and volume. Restore the queue and position paused after restart.
+- Add searchable tags and notes; classification and playback progress follow rename and Recovery.
 - Repair unfinished downloads locally using saved settings, with original inputs kept until success.
+- Check byte-identical files, recorded missing files and space usage with the background Library
+  organizer; review duplicate recycling, keep a copy per group and undo successful moves.
 - Review the success rate plus categorized failures with an actionable suggested fix.
 - Subscribe to a channel or playlist and filter new entries by title, live/Shorts status, or duration.
 - Switch the core interface between English, Simplified Chinese, Traditional Chinese, and Japanese.
+- Switch between light and dark appearance with a sun/moon control that remembers your choice.
 - Use the first-run guide to automatically check readiness and prepare missing download features.
 - Fall back to static page scanning or optional browser rendering for less common sites.
 - Use a dedicated public-download-page fallback for `hanime1.me`; use yt-dlp's native Iwara extractor
@@ -56,7 +66,9 @@ python webui.py
 
 Python 3.10 or newer is required. The base install includes yt-dlp, its default components, Deno,
 and `curl_cffi` for sites such as Iwara that require browser impersonation. The `desktop` extra adds
-pywebview for a native app window; without it, the app falls back to your default browser. ffmpeg is
+pywebview for a native app window, plus pystray and Pillow for the Windows tray and Windows-Toasts
+for actionable Windows completion notifications; without pywebview,
+the app falls back to your default browser. ffmpeg is
 still a system dependency for video/audio processing and must be available on PATH for those modes.
 Cover-only and direct-image downloads do not require ffmpeg.
 Keep source audio uses ffmpeg for extraction and metadata, but never silently converts an unsupported
@@ -82,6 +94,42 @@ By default this opens in its own window (`--ui window`). If `pywebview` is not i
 automatically opens your default browser instead and tells you so. Use `--ui browser` to always
 use a browser tab, or `--ui none` when developing the frontend with `npm run dev`.
 
+On Windows, closing the main window asks whether to keep downloading in the tray or exit.
+Remember **Always run in background** to skip confirmation, and change it from **Close behavior**
+in the sidebar (or **More tools** in narrow windows).
+**Exit directly** skips the prompt only when no downloads are running or waiting.
+Click the tray icon to reopen the app, or right-click for **Quick download** and **Exit**.
+The small download panel accepts one pasted/clipboard link, video or audio and quality, then
+adds it to the same queue. It downloads a single item without subtitles; video covers are saved
+and embedded when available, with the separate image retained for Library. Use the main
+window for playlists and advanced options. Clipboard access happens only when you click
+**Read clipboard**. If the tray cannot start, background is disabled and exit requires confirmation.
+When the desktop app is in the background, Windows shows one completion notification after the
+queue finishes, with **Play**, **Open folder**, and **View queue** actions. Multiple downloads
+explicitly offer the latest completed file; failures are counted and can be reviewed in Queue.
+The top-bar bell enables or disables these notifications and remembers the choice. Delivery runs
+in Python independently of WebView polling. Windows notification settings and Do Not Disturb
+still control banner visibility. Exiting the app clears its pending completion notifications.
+After updating a source checkout, install new desktop dependencies with the same interpreter
+used to launch it: `python -m pip install -e ".[desktop]"`. If you use the project virtual
+environment, launch with `.venv\Scripts\python.exe webui.py`; packages installed there are not
+available to a separate system Python. Missing tray dependencies now print an installation
+command for the actual running interpreter. Preparing download features inside the app handles
+download components, not these optional desktop dependencies.
+
+New download includes four output presets and supports named custom presets. Presets change only
+format, quality, subtitles and covers; applying one never starts a task. **Settings and help →
+Backup and restore** exports safe preferences and Library organization as JSON. Restore previews
+changes, preserves current conflicting values and matches media by relative path and size. Media,
+queues, subscriptions, sign-in data and proxy settings are excluded; copy media separately.
+
+The optional [Chrome extension](browser-extension/README.md) sends the current video or music page
+through its toolbar, **Alt+Shift+V**, or an explicit page/link right-click action. Every entry opens
+the same output/quality confirmation; links are not downloaded automatically. It sends the choice
+to this same queue. Choose video, MP3 or source audio and confirm the save folder without copying
+the link. The initial version loads from `browser-extension/chrome` using Chrome's **Load unpacked**;
+it has not been published to the Chrome Web Store. Keep the local app running.
+
 Run `python webui.py --help` for all options (download folder, port, worker count,
 `--sub-interval` for how often subscriptions are re-checked).
 
@@ -99,7 +147,9 @@ The first-run guide opens automatically for a new, empty installation and can be
 the sidebar. **Prepare download features** installs missing supported components on Windows and
 restarts the service when needed. No command or executable path is required. Windows application
 control blocks are explained separately and cannot be removed by this button.
-The language selector is also in the sidebar (or the mobile header). Technical extractor logs and
+Open **Settings and help** for updates and diagnostics. **Getting started**, **Language** and
+**Close behavior** have independent sidebar entries; narrow windows put the guide and close
+settings under **More tools** in the top bar. Technical extractor logs and
 some site-supplied diagnostics remain in their original language.
 
 Queue failures provide plain explanations and relevant actions, including preparation, retry,
@@ -114,6 +164,11 @@ Moving files to Recovery offers **Undo**, including bulk moves. Temporary networ
 the failed entry at most twice and show **Reconnecting**; canceled jobs stop waiting immediately.
 **Diagnostics** remains available for advanced checks and optional components.
 
+The interface adapts to window width and height. Wide download pages use two columns;
+narrow windows use bottom navigation. Video, Audio and Images reveal only relevant formats.
+Download actions stay visible while settings scroll, and Queue/Library search toolbars remain
+visible while browsing long lists. Library's **More** control groups secondary file actions.
+
 Application data stays local:
 
 - Downloads, task history and subscriptions live under the selected download directory.
@@ -123,8 +178,9 @@ Application data stays local:
 ## Windows Portable ZIP
 
 The portable release is for 64-bit Windows and includes the official CPython embeddable runtime.
-It does not need a separately installed Python, administrator access, registry changes, or files in
-Program Files.
+It does not need a separately installed Python, administrator access, or files in Program Files.
+Windows completion notifications register a Video Grabber application identity in the current
+user's registry. This does not change machine-wide settings or register the app to start with Windows.
 
 1. Extract the complete ZIP to a writable folder.
 2. Double-click `Start Video Grabber.cmd`.
@@ -197,6 +253,20 @@ or use a file's collection button, to add or remove membership. Classification d
 files. Deleting a collection keeps its files and favorites. Classification stays with files renamed
 in the app and moved to/restored from Recovery, and is retained across restarts. As with other
 Library metadata, it is local to the selected download folder.
+
+New installations open Library first; remembered pages and direct links still take precedence.
+**Import local files** copies selected files into the current folder's `imports/` directory, leaving
+originals untouched. Imports support up to 100 files per batch and 8 GiB per file. Identical imported
+content with the same extension is skipped when its recorded file is still unchanged. Same-name
+conflicts never overwrite existing files. Canceled/failed transfers remain hidden and are cleaned up;
+a forced process termination may leave temporary files in the hidden `.library-imports/` folder.
+
+Choose **Grid view** or **List view**. Cards use separate covers when available, otherwise supported
+videos attempt a first-frame preview. Click the title/artwork for details, tags and a note; search
+includes both. The built-in player resumes unfinished playback and saves position periodically,
+on pause and when closing details. **Continue watching / listening** filters saved unfinished
+progress. Opening details alone does not reset progress. Browser codec support limits previews;
+system-player/download fallbacks remain available, and external playback does not report progress.
 
 ## Tests
 

@@ -1,0 +1,79 @@
+{
+  "sendPage": { "message": "傳送此網頁到 Video Grabber…" },
+  "sendLink": { "message": "傳送此連結到 Video Grabber…" },
+  "selectedLink": { "message": "所選連結" },
+  "selectionExpired": {
+    "message": "此選擇已過期或已開啟，請重新按右鍵選擇網頁或連結。"
+  },
+  "shortcutHint": { "message": "快捷鍵：$1" },
+  "shortcutNotAssigned": { "message": "尚未設定快捷鍵" },
+  "changeShortcut": { "message": "修改快捷鍵" },
+  "shortcutSettingsUnavailable": {
+    "message": "請開啟 chrome://extensions/shortcuts 修改快捷鍵。"
+  },
+  "existingHint": {
+    "message": "已有下載檔案，請在媒體庫確認格式和畫質後選擇。另存副本會保留原檔案。"
+  },
+  "useExisting": { "message": "使用已有檔案" },
+  "downloadCopy": { "message": "另存副本下載" },
+  "openLibrary": { "message": "開啟媒體庫" },
+  "cancelExisting": { "message": "取消" },
+  "extensionName": { "message": "Video Grabber — 網頁下載助手" },
+  "extensionDescription": {
+    "message": "將目前影片或音樂頁面傳送至本機 Video Grabber 下載佇列。"
+  },
+  "reconnect": { "message": "重新連線" },
+  "pageUrl": { "message": "目前頁面連結" },
+  "output": { "message": "儲存為" },
+  "video": { "message": "影片（MP4）" },
+  "mp3": { "message": "音訊（MP3）" },
+  "sourceAudio": { "message": "保留來源音訊" },
+  "quality": { "message": "最高影片畫質" },
+  "best": { "message": "最佳可用畫質" },
+  "audioQuality": { "message": "音質" },
+  "highAudio": { "message": "最高音質 · 320 kbps" },
+  "standardAudio": { "message": "標準音質 · 192 kbps" },
+  "smallAudio": { "message": "節省空間 · 128 kbps" },
+  "sourceHint": {
+    "message": "保留最佳可用來源音訊，不重新編碼；檔案格式由來源決定。"
+  },
+  "saveTo": { "message": "儲存到" },
+  "connecting": { "message": "正在連線至本機軟體…" },
+  "connected": { "message": "已連線至 Video Grabber" },
+  "multipleApps": { "message": "發現多個軟體實例，請先確認儲存資料夾。" },
+  "chooseApp": { "message": "請選擇儲存資料夾" },
+  "connectionSettings": { "message": "連線設定" },
+  "port": { "message": "自訂軟體連接埠（選用）" },
+  "connect": { "message": "連線" },
+  "singleItem": {
+    "message": "僅下載單個內容，不附帶播放清單或字幕。影片自動儲存可用的網站封面。"
+  },
+  "download": { "message": "加入下載佇列" },
+  "viewQueue": { "message": "查看佇列" },
+  "currentPage": { "message": "目前頁面" },
+  "openApp": {
+    "message": "請先在本機開啟 Video Grabber，再點擊「重新連線」。"
+  },
+  "unsupportedPage": {
+    "message": "請切換至 HTTP 或 HTTPS 的影片或音樂頁面，再開啟此擴充功能。"
+  },
+  "invalidPort": { "message": "請輸入 1 至 65535 之間的連接埠。" },
+  "invalidConnection": { "message": "僅能連線至 127.0.0.1 上的本機軟體。" },
+  "invalidFormat": { "message": "請選擇影片、MP3 或來源音訊。" },
+  "invalidRequest": { "message": "請重新開啟擴充功能再試。" },
+  "notOurApp": { "message": "此位址沒有回傳有效的 Video Grabber 軟體。" },
+  "appUnavailable": {
+    "message": "無法連線，請開啟 Video Grabber 後點擊「重新連線」。"
+  },
+  "downloadUnconfirmed": {
+    "message": "無法確認是否已加入下載，請先檢查軟體佇列再重試。"
+  },
+  "downloadFailed": { "message": "軟體未能加入這項下載。" },
+  "openQueueFailed": { "message": "無法開啟佇列，請從軟體系統匣選單重試。" },
+  "added": { "message": "已加入軟體的下載佇列，可以繼續瀏覽。" },
+  "duplicate": { "message": "這項下載已經在佇列中。" },
+  "settingsNotSaved": { "message": "無法記住選項，仍可正常使用擴充功能。" },
+  "destinationChanged": {
+    "message": "軟體的儲存資料夾已改變，請點擊「重新連線」並確認資料夾後再下載。"
+  }
+}

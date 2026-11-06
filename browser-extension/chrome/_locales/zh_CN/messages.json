@@ -1,0 +1,79 @@
+{
+  "sendPage": { "message": "发送此网页到 Video Grabber…" },
+  "sendLink": { "message": "发送此链接到 Video Grabber…" },
+  "selectedLink": { "message": "所选链接" },
+  "selectionExpired": {
+    "message": "此选择已过期或已打开，请重新右键选择网页或链接。"
+  },
+  "shortcutHint": { "message": "快捷键：$1" },
+  "shortcutNotAssigned": { "message": "尚未设置快捷键" },
+  "changeShortcut": { "message": "修改快捷键" },
+  "shortcutSettingsUnavailable": {
+    "message": "请打开 chrome://extensions/shortcuts 修改快捷键。"
+  },
+  "existingHint": {
+    "message": "已有下载文件，请在媒体库确认格式和画质后选择。另存副本会保留原文件。"
+  },
+  "useExisting": { "message": "使用已有文件" },
+  "downloadCopy": { "message": "另存副本下载" },
+  "openLibrary": { "message": "打开媒体库" },
+  "cancelExisting": { "message": "取消" },
+  "extensionName": { "message": "Video Grabber — 网页下载助手" },
+  "extensionDescription": {
+    "message": "将当前视频或音乐页面发送到本机 Video Grabber 下载队列。"
+  },
+  "reconnect": { "message": "重新连接" },
+  "pageUrl": { "message": "当前页面链接" },
+  "output": { "message": "保存为" },
+  "video": { "message": "视频（MP4）" },
+  "mp3": { "message": "音频（MP3）" },
+  "sourceAudio": { "message": "保留来源音频" },
+  "quality": { "message": "最高视频画质" },
+  "best": { "message": "最佳可用画质" },
+  "audioQuality": { "message": "音质" },
+  "highAudio": { "message": "最高音质 · 320 kbps" },
+  "standardAudio": { "message": "标准音质 · 192 kbps" },
+  "smallAudio": { "message": "节省空间 · 128 kbps" },
+  "sourceHint": {
+    "message": "保留最佳可用来源音频，不重新编码；文件格式由来源决定。"
+  },
+  "saveTo": { "message": "保存到" },
+  "connecting": { "message": "正在连接本机软件…" },
+  "connected": { "message": "已连接 Video Grabber" },
+  "multipleApps": { "message": "发现多个软件实例，请先确认保存文件夹。" },
+  "chooseApp": { "message": "请选择保存文件夹" },
+  "connectionSettings": { "message": "连接设置" },
+  "port": { "message": "自定义软件端口（可选）" },
+  "connect": { "message": "连接" },
+  "singleItem": {
+    "message": "仅下载单个内容，不附带播放列表或字幕。视频自动保存可用的网站封面。"
+  },
+  "download": { "message": "加入下载队列" },
+  "viewQueue": { "message": "查看队列" },
+  "currentPage": { "message": "当前页面" },
+  "openApp": {
+    "message": "请先在本机打开 Video Grabber，然后点击“重新连接”。"
+  },
+  "unsupportedPage": {
+    "message": "请切换到 HTTP 或 HTTPS 的视频或音乐页面，再打开此扩展。"
+  },
+  "invalidPort": { "message": "请输入 1 至 65535 之间的端口。" },
+  "invalidConnection": { "message": "仅能连接 127.0.0.1 上的本机软件。" },
+  "invalidFormat": { "message": "请选择视频、MP3 或来源音频。" },
+  "invalidRequest": { "message": "请重新打开扩展再试。" },
+  "notOurApp": { "message": "此地址没有返回有效的 Video Grabber 软件。" },
+  "appUnavailable": {
+    "message": "无法连接，请打开 Video Grabber 后点击“重新连接”。"
+  },
+  "downloadUnconfirmed": {
+    "message": "无法确认是否已加入下载，请先检查软件队列再重试。"
+  },
+  "downloadFailed": { "message": "软件未能加入这项下载。" },
+  "openQueueFailed": { "message": "无法打开队列，请从软件托盘菜单重试。" },
+  "added": { "message": "已加入软件的下载队列，可以继续浏览。" },
+  "duplicate": { "message": "这项下载已经在队列中。" },
+  "settingsNotSaved": { "message": "无法记住选项，仍可正常使用扩展。" },
+  "destinationChanged": {
+    "message": "软件的保存文件夹已改变，请点击“重新连接”并确认文件夹后再下载。"
+  }
+}

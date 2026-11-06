@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Video Grabber</title>
+    <link rel="stylesheet" href="popup.css" />
+    <script type="module" src="popup.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <strong>↓ Video Grabber</strong
+        ><button id="reconnect" type="button" data-i18n="reconnect">
+          Reconnect
+        </button>
+      </header>
+      <div class="scroll-body">
+        <section class="page-info">
+          <h1 id="page-title"></h1>
+          <input id="page-url" type="text" readonly data-i18n-aria="pageUrl" />
+          <p id="page-error" class="error" hidden></p>
+        </section>
+        <p class="muted shortcut-row">
+          <span id="shortcut-hint"></span>
+          <button
+            id="shortcuts"
+            type="button"
+            data-i18n="changeShortcut"
+          ></button>
+        </p>
+        <form id="download-form">
+          <fieldset id="controls" disabled>
+            <label
+              ><span data-i18n="output">Save as</span
+              ><select id="mode">
+                <option value="mp4" data-i18n="video">Video (MP4)</option>
+                <option value="mp3" data-i18n="mp3">Audio (MP3)</option>
+                <option value="original" data-i18n="sourceAudio">
+                  Keep source audio
+                </option>
+              </select></label
+            >
+            <label id="video-quality"
+              ><span data-i18n="quality">Maximum video quality</span
+              ><select id="quality">
+                <option value="best" data-i18n="best">Best available</option>
+                <option>2160</option>
+                <option>1440</option>
+                <option>1080</option>
+                <option>720</option>
+                <option>480</option>
+                <option>360</option>
+              </select></label
+            >
+            <label id="audio-quality" hidden
+              ><span data-i18n="audioQuality">Audio quality</span
+              ><select id="abr">
+                <option value="320" data-i18n="highAudio">
+                  Highest quality · 320 kbps
+                </option>
+                <option value="192" data-i18n="standardAudio" selected>
+                  Standard · 192 kbps
+                </option>
+                <option value="128" data-i18n="smallAudio">
+                  Save space · 128 kbps
+                </option>
+              </select></label
+            >
+            <p id="source-hint" class="muted" data-i18n="sourceHint" hidden>
+              Best available source audio, without re-encoding.
+            </p>
+          </fieldset>
+        </form>
+        <section class="destination">
+          <span class="muted" data-i18n="saveTo">Save to</span
+          ><select id="apps" disabled data-i18n-aria="saveTo"></select>
+          <p id="save-path" class="muted"></p>
+          <p id="connection-status" class="muted" role="status"></p>
+        </section>
+        <p class="muted" data-i18n="singleItem">
+          Single item only. No playlist, subtitles or cover.
+        </p>
+        <details>
+          <summary data-i18n="connectionSettings">Connection settings</summary>
+          <label
+            ><span data-i18n="port">Custom app port (optional)</span
+            ><input
+              id="port"
+              type="number"
+              min="1"
+              max="65535"
+              placeholder="8765" /></label
+          ><button id="apply-port" type="button" data-i18n="connect">
+            Connect
+          </button>
+        </details>
+      </div>
+      <section id="existing" hidden aria-live="polite">
+        <p data-i18n="existingHint"></p>
+        <ul id="existing-names"></ul>
+        <button
+          id="use-existing"
+          type="button"
+          data-i18n="useExisting"
+        ></button>
+        <button
+          id="download-copy"
+          type="button"
+          data-i18n="downloadCopy"
+        ></button>
+        <button
+          id="existing-library"
+          type="button"
+          data-i18n="openLibrary"
+        ></button>
+        <button
+          id="cancel-existing"
+          type="button"
+          data-i18n="cancelExisting"
+        ></button>
+      </section>
+      <div id="result" role="status" hidden></div>
+      <p id="error" class="error" role="alert" hidden></p>
+      <footer>
+        <button
+          id="download"
+          type="submit"
+          form="download-form"
+          disabled
+          data-i18n="download"
+        >
+          Add to queue</button
+        ><button id="queue" type="button" disabled data-i18n="viewQueue">
+          View queue
+        </button>
+      </footer>
+    </main>
+  </body>
+</html>

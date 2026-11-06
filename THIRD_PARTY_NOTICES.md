@@ -16,6 +16,10 @@ own licenses; this file does not license the Video Grabber project itself.
   information are published with that release. Source: <https://github.com/yt-dlp/FFmpeg-Builds>
 - Deno — MIT License. Source: <https://github.com/denoland/deno>
 - Playwright (optional) — Apache License 2.0. Source: <https://github.com/microsoft/playwright-python>
+- pystray — LGPL-3.0. Source and license: <https://github.com/moses-palmer/pystray>
+- Pillow — HPND and bundled-library licenses. Source and licenses: <https://github.com/python-pillow/Pillow>
+- Windows-Toasts — Apache License 2.0. Source and license: <https://github.com/DatGuy1/Windows-Toasts>
+- PyWinRT runtime and Windows API projections — MIT License. Source and licenses: <https://github.com/pywinrt/pywinrt>
 
 Open **Diagnostics** in the application to see installed versions. `runtime/components.json`
 records the exact downloaded release URL and SHA-256 digest for native components.
