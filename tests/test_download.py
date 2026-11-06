@@ -12,6 +12,29 @@ from grab_models import Job
 from grab_state import JobManager
 
 
+def test_optional_cover_failure_preserves_video_and_does_not_hide_other_failures(tmp_path):
+    from unittest.mock import Mock
+    from yt_dlp.postprocessor.embedthumbnail import EmbedThumbnailPP
+    from yt_dlp.postprocessor.ffmpeg import FFmpegVideoRemuxerPP
+    from yt_dlp.utils import PostProcessingError
+    cls = grab_download.optional_video_cover_downloader(yt_dlp.YoutubeDL)
+    video, cover = tmp_path / "video.mp4", tmp_path / "video.jpg"
+    video.write_bytes(b"original video")
+    cover.write_bytes(b"original cover")
+    with cls({"quiet": True}) as ydl:
+        pp = EmbedThumbnailPP(ydl, already_have_thumbnail=True)
+        pp.run = Mock(side_effect=PostProcessingError("unsupported artwork"))
+        ydl.report_warning = Mock()
+        info = {"filepath": str(video)}
+        assert ydl.run_pp(pp, info) is info
+        ydl.report_warning.assert_called_once()
+        assert video.read_bytes() == b"original video" and cover.read_bytes() == b"original cover"
+        remux = FFmpegVideoRemuxerPP(ydl)
+        remux.run = Mock(side_effect=PostProcessingError("failed remux"))
+        with pytest.raises(PostProcessingError, match="failed remux"):
+            ydl.run_pp(remux, info)
+
+
 class FixtureIE(InfoExtractor):
     _VALID_URL = r"https://fixture.invalid/(?P<id>playlist|[1-3])"
 

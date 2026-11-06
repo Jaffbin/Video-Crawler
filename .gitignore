@@ -10,6 +10,8 @@ downloads/
 .grab-history.json
 .grab-subscriptions.json
 .grab-library.json
+.grab-library.json.bak
+.grab-library.db*
 .grab-trash/
 .archive.txt
 cookies.txt
@@ -18,6 +20,7 @@ cookies.txt
 __pycache__/
 *.pyc
 .pytest_cache/
+.pytest_tmp*/
 *.egg-info/
 
 # Node (the built interface lives in webui_dist/ and IS committed)

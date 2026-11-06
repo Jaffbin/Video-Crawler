@@ -43,7 +43,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Could not bundle pip into embedded Python." }
 
     $Files = @(
-        "grab.py", "grab_config.py", "grab_download.py", "grab_images.py", "grab_library.py", "grab_repair.py", "grab_models.py", "grab_sites.py", "grab_state.py", "grab_storage.py",
+        "grab.py", "grab_backup.py", "grab_config.py", "grab_download.py", "grab_images.py", "grab_library.py", "grab_organizer.py", "grab_repair.py", "grab_desktop.py", "grab_notifications.py", "grab_models.py", "grab_sites.py", "grab_state.py", "grab_storage.py",
         "webui.py", "portable_bootstrap.py", "portable_launcher.py", "portable_manifest.json", "README.md",
         "THIRD_PARTY_NOTICES.md"
     )
@@ -51,6 +51,8 @@ try {
         Copy-Item -LiteralPath (Join-Path $RepoRoot $File) -Destination (Join-Path $App $File)
     }
     Copy-Item -Recurse -LiteralPath (Join-Path $RepoRoot "webui_dist") -Destination (Join-Path $App "webui_dist")
+    Copy-Item -Recurse -LiteralPath (Join-Path $RepoRoot "browser-extension\chrome") -Destination (Join-Path $App "Chrome Extension")
+    Copy-Item -LiteralPath (Join-Path $RepoRoot "browser-extension\README.md") -Destination (Join-Path $App "Chrome Extension Instructions.md")
     Get-ChildItem -LiteralPath (Join-Path $RepoRoot "portable") -Filter "*.cmd" | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $App $_.Name)
     }

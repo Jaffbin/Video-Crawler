@@ -193,7 +193,7 @@ def repair(library, relative, records, options, ffmpeg, *, check, log):
                 os.replace(output, target)
                 # Classification may change while ffmpeg processes the temporary copy.
                 current = data["files"].get(relative, {})
-                classification = {key: current[key] for key in ("favorite", "collections") if key in current}
+                classification = {key: current[key] for key in ("favorite", "collections", "tags", "note", "playback") if key in current}
                 data["files"][target_relative] = {**record, **classification, "complete": True,
                                                   "repair_options": repair_options(options)}
                 library.store.save(data)

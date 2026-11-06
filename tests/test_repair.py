@@ -48,12 +48,14 @@ def test_repair_preserves_classification_changes_made_during_processing(local_me
     def process(*args):
         original(*args)
         library.organize([source.name], favorite=True, collection_id=new)
+        library.describe(source.name, ["Updated"], "Keep this note after repair")
         library.change_collection("delete", collection_id=old)
 
     monkeypatch.setattr(grab_repair, "process", process)
     do_repair(local_media)
     record = library.load()["files"][source.name]
     assert record["favorite"] is True and record["collections"] == [new] and record["complete"] is True
+    assert record["tags"] == ["Updated"] and record["note"] == "Keep this note after repair"
 
 
 def test_local_repair_embeds_cover_and_subtitles(local_media):

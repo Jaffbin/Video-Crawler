@@ -1,4 +1,5 @@
 import pytest
+import io
 
 from grab_library import MediaLibrary
 
@@ -13,6 +14,87 @@ def media(library, relative="video.mp4"):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"media content")
     return path
+
+
+def test_import_is_atomic_preserves_original_and_detects_duplicates(library, tmp_path):
+    original = tmp_path / "original.mp4"
+    original.write_bytes(b"local video")
+    result = library.import_file(original.name, io.BytesIO(original.read_bytes()), original.stat().st_size)
+    assert result == {"path": "imports/original.mp4", "duplicate": False}
+    assert original.read_bytes() == (tmp_path / result["path"]).read_bytes()
+    duplicate = library.import_file("another-name.mp4", io.BytesIO(b"local video"), 11)
+    assert duplicate == {"path": result["path"], "duplicate": True}
+    assert not (tmp_path / "imports/another-name.mp4").exists()
+    assert list((tmp_path / ".library-imports").iterdir()) == []
+    record = library.load()["files"][result["path"]]
+    assert record["source"] == "local" and record["complete"] is True
+
+
+def test_import_rejects_name_conflicts_and_external_edits_are_not_false_duplicates(library):
+    library.import_file("clip.mp4", io.BytesIO(b"before"), 6)
+    destination = library.root() / "imports/clip.mp4"
+    destination.write_bytes(b"edited")
+    # Deterministic even on a filesystem with coarse timestamp resolution.
+    data = library.load()
+    data["files"]["imports/clip.mp4"]["import_mtime_ns"] = -1
+    library.store.save(data)
+    with pytest.raises(FileExistsError):
+        library.import_file("clip.mp4", io.BytesIO(b"before"), 6)
+    assert destination.read_bytes() == b"edited"
+    assert library.import_file("second.mp4", io.BytesIO(b"before"), 6)["duplicate"] is False
+
+
+@pytest.mark.parametrize("name,size", [("../bad.mp4", 1), ("hidden/.x.mp4", 1), (".x.mp4", 1),
+                                     ("CON.mp4", 1), ("bad.txt", 1), ("video.mp4", 0),
+                                     ("video.mp4", 8 * 1024**3 + 1)])
+def test_import_rejects_invalid_input_without_publishing(library, name, size):
+    with pytest.raises(ValueError):
+        library.import_file(name, io.BytesIO(b"x"), size)
+    assert library.load()["files"] == {}
+
+
+def test_interrupted_import_and_metadata_failure_leave_no_published_file(library, monkeypatch):
+    with pytest.raises(ValueError, match="interrupted"):
+        library.import_file("video.mp4", io.BytesIO(b"short"), 20)
+    assert not (library.root() / "imports/video.mp4").exists()
+    monkeypatch.setattr(type(library.store), "save", lambda *args: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError):
+        library.import_file("video.mp4", io.BytesIO(b"data"), 4)
+    assert not (library.root() / "imports/video.mp4").exists()
+    assert list((library.root() / ".library-imports").iterdir()) == []
+
+
+def test_tags_notes_and_playback_follow_rename_recovery_and_restart(library):
+    source = media(library)
+    library.describe(source.name, [" Study ", "study", "音频"], "Useful at 0:30\nSecond line")
+    library.save_playback(source.name, 30, 120)
+    renamed = library.rename(source.name, "new.mp4")
+    recovery_id = library.trash(renamed)
+    restored = MediaLibrary(library.root, library.suffixes)
+    restored.restore(recovery_id)
+    record = restored.load()["files"][renamed]
+    assert record["tags"] == ["Study", "音频"] and "Second line" in record["note"]
+    assert record["playback"]["position"] == 30 and record["playback"]["finished"] is False
+    restored.save_playback(renamed, 120, 120)
+    assert restored.load()["files"][renamed]["playback"]["finished"] is True
+
+
+@pytest.mark.parametrize("position,duration", [(True, 10), (0, False), (-1, 10), (11, 10),
+                                              (0, 0), (float('nan'), 10), (1, float('inf')), (10**400, 10), (0, 10**400)])
+def test_playback_validation(library, position, duration):
+    source = media(library)
+    with pytest.raises(ValueError):
+        library.save_playback(source.name, position, duration)
+    assert library.load()["files"] == {}
+
+
+@pytest.mark.parametrize("tags,note", [("study", ""), ([""], ""), (["x" * 41], ""),
+                                     (["x"] * 21, ""), ([], "x" * 2001), ([], None), (["x\n"], "")])
+def test_detail_validation(library, tags, note):
+    source = media(library)
+    with pytest.raises(ValueError):
+        library.describe(source.name, tags, note)
+    assert library.load()["files"] == {}
 
 
 def test_organization_survives_remember_rename_recovery_and_restart(library):
@@ -333,3 +415,195 @@ def test_implicit_cover_cannot_be_managed_as_independent_image(tmp_path):
         library.trash("video.jpg")
     library.rename("video.mp4", "new.mp4")
     assert not video.exists() and not cover.exists() and (tmp_path / "new.jpg").exists()
+
+
+def test_batch_trash_saves_once_and_restores_organization_after_restart(library, monkeypatch):
+    names = [f"group/clip-{index}.mp4" for index in range(200)]
+    for name in names:
+        media(library, name)
+    media(library, "group/clip-0.jpg")
+    media(library, "group/clip-0.en.srt")
+    metadata = {name: {"favorite": True, "tags": ["keep"], "note": name,
+                       "playback": {"position": 12, "duration": 60}} for name in names}
+    library.store.save({"files": metadata})
+    save = type(library.store).save
+    saves = []
+
+    def counted_save(store, value):
+        saves.append(len(value["trash"]))
+        save(store, value)
+
+    with monkeypatch.context() as context:
+        context.setattr(type(library.store), "save", counted_save)
+        result = library.trash_many(names + [names[0]], completions={names[0]: False})
+    assert result["processed"] == names and result["failed"] == []
+    assert len(result["recovery_ids"]) == 200 and saves == [200]
+    restarted = MediaLibrary(library.root, library.suffixes)
+    for name, recovery_id in zip(names, result["recovery_ids"]):
+        assert restarted.restore(recovery_id) == name
+        assert (library.root() / name).read_bytes() == b"media content"
+    assert restarted.load()["files"] == {**metadata, names[0]: {**metadata[names[0]], "complete": False}}
+    assert (library.root() / "group/clip-0.jpg").read_bytes() == b"media content"
+    assert (library.root() / "group/clip-0.en.srt").read_bytes() == b"media content"
+    assert restarted.trash_items() == []
+
+
+def test_batch_trash_validation_failures_need_no_writes(library, monkeypatch):
+    media(library)
+    media(library, "video.mp3")
+    media(library, "video.jpg")
+
+    def unexpected_save(*args):
+        pytest.fail("Invalid groups must not persist changes")
+
+    monkeypatch.setattr(type(library.store), "save", unexpected_save)
+    result = library.trash_many(["../outside.mp4", "missing.mp4", "video.mp4"])
+    assert result["processed"] == result["recovery_ids"] == []
+    assert [failure["item"] for failure in result["failed"]] == ["../outside.mp4", "missing.mp4", "video.mp4"]
+    assert (library.root() / "video.jpg").exists()
+
+
+def test_batch_trash_save_failure_moves_nothing(library, monkeypatch):
+    names = ["one.mp4", "two.mp4"]
+    for name in names:
+        media(library, name)
+    library.store.save({"files": {name: {"favorite": True} for name in names}})
+    before = library.load()
+    monkeypatch.setattr(type(library.store), "save", lambda *args: (_ for _ in ()).throw(OSError("disk full")))
+    result = library.trash_many(names)
+    assert result["processed"] == result["recovery_ids"] == []
+    assert [failure["item"] for failure in result["failed"]] == names
+    assert library.load() == before
+    assert all((library.root() / name).is_file() for name in names)
+    assert not list(library.trash_directory().iterdir())
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("rollback_fails", [False, True])
+def test_batch_trash_partial_failure_retains_recoverable_groups(library, monkeypatch, cleanup_fails, rollback_fails):
+    names = ["one.mp4", "locked.mp4", "three.mp4"]
+    for name in names:
+        media(library, name)
+    media(library, "locked.jpg")
+    metadata = {name: {"note": name, "favorite": True} for name in names}
+    library.store.save({"files": metadata})
+    move, save = library.move_without_overwrite, type(library.store).save
+    saves = []
+
+    def fail_move(source, target):
+        if source.name == "locked.jpg" or (rollback_fails and target.name == "locked.mp4"):
+            raise PermissionError("File locked")
+        move(source, target)
+
+    def fail_cleanup(store, value):
+        saves.append(len(value["trash"]))
+        if cleanup_fails and len(saves) == 2:
+            raise OSError("disk full")
+        save(store, value)
+
+    with monkeypatch.context() as context:
+        context.setattr(library, "move_without_overwrite", fail_move)
+        context.setattr(type(library.store), "save", fail_cleanup)
+        result = library.trash_many(names)
+    assert result["processed"] == ["one.mp4", "three.mp4"]
+    assert len(result["recovery_ids"]) == 2
+    assert [failure["item"] for failure in result["failed"]] == ["locked.mp4"]
+    assert len(saves) == (1 if rollback_fails else 2)
+    restarted = MediaLibrary(library.root, library.suffixes)
+    assert len(restarted.load()["trash"]) == (3 if rollback_fails or cleanup_fails else 2)
+    for recovery_id in list(restarted.load()["trash"]):
+        restarted.restore(recovery_id)
+    assert restarted.load()["files"] == metadata
+    assert all((library.root() / name).read_bytes() == b"media content" for name in [*names, "locked.jpg"])
+    assert not restarted.trash_items()
+
+
+@pytest.mark.parametrize("moved_count", range(7))
+def test_batch_trash_interruption_at_each_move_can_restore_after_restart(library, monkeypatch, moved_count):
+    names = [f"group/{stem}{suffix}" for stem in ("one", "two") for suffix in (".mp4", ".jpg", ".en.srt")]
+    for name in names:
+        media(library, name).write_bytes(name.encode())
+    metadata = {name: {"favorite": True, "note": name} for name in names if name.endswith(".mp4")}
+    library.store.save({"files": metadata})
+    move, calls = library.move_without_overwrite, []
+
+    def interrupt(source, target):
+        if len(calls) == moved_count:
+            raise SystemExit("simulated shutdown")
+        move(source, target)
+        calls.append(source)
+        if len(calls) == 6:
+            raise SystemExit("simulated shutdown")
+
+    monkeypatch.setattr(library, "move_without_overwrite", interrupt)
+    with pytest.raises(SystemExit, match="simulated shutdown"):
+        library.trash_many(list(metadata))
+    assert len(calls) == moved_count
+    restarted = MediaLibrary(library.root, library.suffixes)
+    assert len(restarted.load()["trash"]) == 2
+    for recovery_id in list(restarted.load()["trash"]):
+        restarted.restore(recovery_id)
+    assert restarted.load()["files"] == metadata and not restarted.trash_items()
+    assert all((library.root() / name).read_bytes() == name.encode() for name in names)
+
+
+def test_interrupted_batch_rejects_changed_original_and_legacy_missing_file(library, monkeypatch):
+    source = media(library)
+    with monkeypatch.context() as context:
+        context.setattr(library, "move_without_overwrite", lambda *args: (_ for _ in ()).throw(SystemExit()))
+        with pytest.raises(SystemExit):
+            library.trash_many([source.name])
+    restarted = MediaLibrary(library.root, library.suffixes)
+    recovery_id = next(iter(restarted.load()["trash"]))
+    source.write_bytes(b"replacement download")
+    with pytest.raises(FileExistsError):
+        restarted.restore(recovery_id)
+    assert source.read_bytes() == b"replacement download" and restarted.trash_items()
+    source.unlink()
+    with pytest.raises(FileNotFoundError):
+        restarted.restore(recovery_id)
+    data = restarted.load()
+    data["trash"][recovery_id].pop("originals")
+    restarted.store.save(data)
+    media(library)
+    with pytest.raises(FileExistsError):
+        restarted.restore(recovery_id)
+
+
+def test_interrupted_restore_and_failed_save_can_be_retried(library, monkeypatch):
+    names = ["video.mp4", "video.jpg", "video.en.srt"]
+    for name in names:
+        media(library, name)
+    library.store.save({"files": {"video.mp4": {"favorite": True}}})
+    recovery_id = library.trash("video.mp4")
+    move = library.move_without_overwrite
+
+    def interrupt(source, target):
+        move(source, target)
+        raise SystemExit("simulated shutdown")
+
+    with monkeypatch.context() as context:
+        context.setattr(library, "move_without_overwrite", interrupt)
+        with pytest.raises(SystemExit):
+            library.restore(recovery_id)
+    restarted = MediaLibrary(library.root, library.suffixes)
+    with monkeypatch.context() as context:
+        context.setattr(type(library.store), "save", lambda *args: (_ for _ in ()).throw(OSError("disk full")))
+        with pytest.raises(OSError, match="disk full"):
+            restarted.restore(recovery_id)
+    assert (library.root() / "video.mp4").is_file() and not (library.root() / "video.jpg").exists()
+    assert restarted.trash_items()
+    restarted.restore(recovery_id)
+    assert all((library.root() / name).read_bytes() == b"media content" for name in names)
+    assert restarted.load()["files"]["video.mp4"] == {"favorite": True}
+
+
+def test_legacy_recovery_without_identities_still_restores(library):
+    media(library)
+    media(library, "video.jpg")
+    recovery_id = library.trash("video.mp4")
+    data = library.load()
+    data["trash"][recovery_id].pop("originals")
+    library.store.save(data)
+    assert library.restore(recovery_id) == "video.mp4"
+    assert (library.root() / "video.jpg").read_bytes() == b"media content"

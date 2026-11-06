@@ -23,6 +23,7 @@ import hmac
 import importlib.metadata
 import importlib.util
 import json
+import logging
 import mimetypes
 import os
 import queue
@@ -46,9 +47,11 @@ from grab_config import parse_web_config  # noqa: E402
 from grab_models import BACKFILL_MAX, Job, Subscription, http_url, normalize_subscription_filters, output_complete  # noqa: E402
 from grab_state import JobManager, SubscriptionManager  # noqa: E402
 from grab_storage import JsonStore  # noqa: E402
-from grab_library import MediaLibrary  # noqa: E402
+from grab_library import IMPORT_MAX_BYTES, MediaLibrary  # noqa: E402
+from grab_organizer import LibraryOrganizer  # noqa: E402
+from grab_backup import BACKUP_MAX_BYTES, BackupService  # noqa: E402
 from grab_repair import repair, repair_options  # noqa: E402
-from grab_download import tracking_downloader, transient_network_error  # noqa: E402
+from grab_download import optional_video_cover_downloader, tracking_downloader, transient_network_error  # noqa: E402
 from grab_images import IMAGE_SUFFIXES, download_image, image_title, probe_image, thumbnail_downloader  # noqa: E402
 import yt_dlp  # noqa: E402
 from yt_dlp.utils import DownloadCancelled, DownloadError  # noqa: E402
@@ -62,6 +65,7 @@ UI_DIST = Path(__file__).resolve().parent / "webui_dist"
 ALLOWED_STATIC_EXT = {".js", ".css", ".svg", ".png", ".ico", ".woff", ".woff2", ".map", ".json", ".webmanifest", ".txt"}
 WINDOW_MODE = False  # set from main(): running inside a pywebview window rather than a browser tab
 NATIVE_WINDOW = None
+NATIVE_DESKTOP = None
 PENDING_ROOT = None
 FOLDER_PICK_LOCK = threading.Lock()
 SETTINGS_LOCK = threading.Lock()
@@ -78,6 +82,8 @@ JOB_MANAGER = JobManager(HISTORY_MAX)
 # Compatibility aliases for existing integrations and tests. New code goes through JOB_MANAGER.
 JOBS = JOB_MANAGER.jobs
 QUEUE = JOB_MANAGER.queue
+ORGANIZER = LibraryOrganizer(LIBRARY, lambda: library_records(),
+                             lambda: any(job.status == "running" for job in JOB_MANAGER.snapshot()))
 STOP_EVENT = threading.Event()
 _SAVE_LOCK = threading.Lock()
 _HISTORY_SNAPSHOT_LOCK = threading.Lock()
@@ -237,8 +243,9 @@ def make_args(o: dict):
     a.sub_langs = langs or a.sub_langs
     a.auto_subs = bool(o.get("auto_subs"))
     a.embed_subs = bool(o.get("embed_subs")) and a.mode == "mp4"
-    a.cover = bool(o.get("cover"))
-    a.keep_cover = bool(o.get("keep_cover")) or a.mode == "original"
+    # Library needs the sidecar even after yt-dlp embeds the cover into an MP4.
+    a.cover = a.mode == "mp4" or bool(o.get("cover"))
+    a.keep_cover = a.mode in ("mp4", "original") or bool(o.get("keep_cover"))
     a.no_playlist = bool(o.get("no_playlist"))
     items = str(o.get("items") or "").strip()
     a.items = items if re.fullmatch(r"[\d,\-:]+", items) else None
@@ -271,11 +278,93 @@ def make_args(o: dict):
     return a
 
 
+def download_profile(args) -> dict:
+    profile = {"mode": args.mode}
+    if args.mode == "mp4":
+        profile.update(quality=args.quality, subs=args.subs, embed_subs=args.embed_subs)
+        if args.subs or args.embed_subs:
+            profile.update(sub_langs=args.sub_langs, auto_subs=args.auto_subs)
+    elif args.mode == "mp3":
+        profile["abr"] = args.abr
+    if args.mode in ("mp3", "original"):
+        profile.update(cover=args.cover, keep_cover=args.keep_cover)
+    return profile
+
+
+def source_identity(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return ""
+    if "@" in parsed.netloc:
+        return parsed._replace(fragment="").geturl()
+    if host in {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+        video = parsed.path.strip("/") if host == "youtu.be" else (parse_qs(parsed.query).get("v") or [""])[0]
+        if not video and parsed.path.startswith(("/shorts/", "/live/")):
+            video = parsed.path.split("/")[2]
+        if re.fullmatch(r"[\w-]{11}", video):
+            return "youtube:" + video
+    return parsed._replace(fragment="", netloc=parsed.netloc.lower()).geturl()
+
+
+def downloaded_matches(urls: list[str], options: dict) -> list[dict]:
+    """Offer existing complete files, never infer that one entry represents an entire playlist."""
+    args = make_args(options)
+    wanted = download_profile(args)
+    if args.items or args.all_sniffed:
+        return []
+    targets = {}
+    for url in urls:
+        identity = source_identity(url)
+        if identity and (args.no_playlist or "list" not in parse_qs(urlparse(url).query)):
+            targets.setdefault(identity, []).append(url)
+    known = {}
+    for job in JOB_MANAGER.snapshot():
+        if job.status == "done":
+            for path in job.files:
+                known[str(Path(path).resolve())] = download_profile(make_args(job.options))
+    matches = []
+    for relative, record in LIBRARY.load()["files"].items():
+        if not isinstance(record, dict) or record.get("complete") is not True:
+            continue
+        matched_urls = targets.get(source_identity(http_url(record.get("source_url")) or ""), [])
+        if not matched_urls:
+            continue
+        try:
+            path = LIBRARY.media_path(relative)
+            if not path.stat().st_size:
+                continue
+        except (OSError, ValueError):
+            continue
+        profile = record.get("download_profile") or known.get(str(path.resolve()))
+        if not isinstance(profile, dict):
+            profile = None
+        suffix = path.suffix.lower()
+        if ((args.mode == "mp4" and suffix != ".mp4") or
+                (args.mode == "mp3" and suffix != ".mp3") or
+                (args.mode == "original" and suffix not in grab.AUDIO_SUFFIXES) or
+                (args.mode in ("cover", "image") and suffix not in IMAGE_SUFFIXES)):
+            continue
+        for url in matched_urls:
+            matches.append({"url": url, "path": relative, "name": path.name, "profile_known": bool(profile),
+                            "settings_match": profile == wanted,
+                            "profile": {key: profile[key] for key in ("mode", "quality", "abr") if key in profile} if isinstance(profile, dict) else {}})
+    return matches
+
+
 # ───────────────────────── Jobs ─────────────────────────
 def run_job(job: Job) -> None:
     if "_repair_path" in job.options:
         return run_repair_job(job)
     args = make_args(job.options)
+    # A differently configured task may have finished while this one was waiting.
+    copy_download = job.options.get("_download_copy") is True or any(
+        item["profile_known"] and not item["settings_match"]
+        for item in downloaded_matches([job.url], job.options)
+    )
+    if copy_download:
+        job.options["_download_copy"] = True
     job.failed_items = []
     if job.cancel.is_set():
         raise DownloadCancelled("Canceled")
@@ -330,6 +419,7 @@ def run_job(job: Job) -> None:
                 "role": "image" if args.mode in ("cover", "image") else "media",
                 "complete": complete,
                 "repair_options": repair_options(vars(args)),
+                "download_profile": download_profile(args),
             }
 
     def image_progress(data):
@@ -403,11 +493,15 @@ def run_job(job: Job) -> None:
         previous_failures = [dict(item) for item in job.failed_items]
         try:
             opts = grab.build_opts(args, referer, name, work)
+            if copy_download:
+                opts["outtmpl"] = opts["outtmpl"].replace(".%(ext)s", f" [copy-{job.work_key}].%(ext)s")
             opts.update(extra)
             with cookie_copy(args) as cookiefile:
                 if cookiefile:
                     opts["cookiefile"] = cookiefile
                 downloader = tracking_downloader(yt_dlp.YoutubeDL, job)
+                if args.mode == "mp4":
+                    downloader = optional_video_cover_downloader(downloader)
                 if args.mode == "original":
                     downloader = grab.original_audio_downloader(downloader)
                 if args.mode == "cover":
@@ -439,7 +533,8 @@ def run_job(job: Job) -> None:
             if cookiefile:
                 opts["cookiefile"] = cookiefile
             with yt_dlp.YoutubeDL(opts) as ydl:
-                path = download_image(ydl, job.url, ROOT, check=check, progress=image_progress)
+                base = ROOT / "images" / f"{image_title(job.url)} [copy-{job.work_key}]" if copy_download else None
+                path = download_image(ydl, job.url, ROOT, base=base, check=check, progress=image_progress)
         image_done(str(path), {"webpage_url": job.url, "title": job.title})
         ok = True
     else:
@@ -666,6 +761,9 @@ def scan_files(*, force: bool = False) -> list[dict]:
     rev = FILES_REV
     out: list[dict] = []
     metadata = library_records()
+    candidates = []
+    media_paths = set()
+    companion_fallback = [False]
     budget = [FILE_SCAN_MAX_ENTRIES]
     reasons = set()
 
@@ -688,32 +786,47 @@ def scan_files(*, force: bool = False) -> list[dict]:
                                 scan(e.path, depth + 1)
                             else:
                                 reasons.add("depth_limit")
-                    elif not e.name.startswith(".") and Path(e.name).suffix.lower() in MEDIA_SUFFIX and e.is_file(follow_symlinks=False):
-                        st = e.stat()
-                        relative = Path(e.path).relative_to(ROOT).as_posix()
-                        record = metadata.get(relative)
-                        record = record if isinstance(record, dict) else {}
-                        if Path(e.path).suffix.lower() in IMAGE_SUFFIXES and LIBRARY.is_attachment(Path(e.path), metadata):
+                    elif not e.name.startswith(".") and Path(e.name).suffix.lower() in MEDIA_SUFFIX:
+                        if not e.is_file(follow_symlinks=False):
+                            if e.is_symlink():
+                                companion_fallback[0] = True
                             continue
-                        out.append({"name": e.name, "path": Path(e.path).relative_to(ROOT).as_posix(),
-                                    "size": st.st_size, "mtime": st.st_mtime,
-                                    "source_url": http_url(record.get("source_url")) or "",
-                                    "source": str(record.get("source") or "")[:200],
-                                    "title": str(record.get("title") or "")[:300],
-                                    "complete": record.get("complete") is not False,
-                                    "can_repair": record.get("complete") is False and isinstance(record.get("repair_options"), dict)
-                                                  and record["repair_options"].get("mode", "mp4") in ("mp4", "mp3"),
-                                    "favorite": record.get("favorite") is True,
-                                    "collections": [key for key in record.get("collections", []) if isinstance(key, str)]
-                                                   if isinstance(record.get("collections"), list) else [],
-                                    "kind": "image" if Path(e.path).suffix.lower() in IMAGE_SUFFIXES else
-                                            "audio" if Path(e.path).suffix.lower() in grab.AUDIO_SUFFIXES else "video",
-                                    "downloaded": record.get("downloaded") if isinstance(record.get("downloaded"), (int, float)) else st.st_mtime})
+                        path = Path(e.path)
+                        st = e.stat()
+                        candidates.append((path, st))
+                        media_paths.add(path)
                 except (OSError, ValueError):
                     reasons.add("unreadable")
                     continue
 
     scan(str(ROOT), 0)
+    # Reuse the bounded, symlink-free scan snapshot for companion checks instead of probing
+    # every possible extension on disk for every file. UI and file-management rules stay shared.
+    # Incomplete directories or symbolic media need the existing filesystem fallback so a
+    # cover discovered before its video is never misclassified as an independent image.
+    companion_paths = None if companion_fallback[0] or reasons & {"entry_limit", "unreadable"} else media_paths
+    for path, st in candidates:
+        relative = path.relative_to(ROOT).as_posix()
+        record = metadata.get(relative)
+        record = record if isinstance(record, dict) else {}
+        suffix = path.suffix.lower()
+        if suffix in IMAGE_SUFFIXES and LIBRARY.is_attachment(path, metadata, media_paths=companion_paths):
+            continue
+        out.append({
+            "name": path.name, "path": relative, "size": st.st_size, "mtime": st.st_mtime,
+            "source_url": http_url(record.get("source_url")) or "",
+            "source": str(record.get("source") or "")[:200],
+            "title": str(record.get("title") or "")[:300],
+            "complete": record.get("complete") is not False,
+            "can_repair": record.get("complete") is False and isinstance(record.get("repair_options"), dict)
+                          and record["repair_options"].get("mode", "mp4") in ("mp4", "mp3"),
+            "favorite": record.get("favorite") is True, **LIBRARY.details_view(record),
+            "thumbnail": LIBRARY.cover_path(path, metadata, media_paths=companion_paths) if suffix not in IMAGE_SUFFIXES else "",
+            "collections": [key for key in record.get("collections", []) if isinstance(key, str)]
+                           if isinstance(record.get("collections"), list) else [],
+            "kind": "image" if suffix in IMAGE_SUFFIXES else "audio" if suffix in grab.AUDIO_SUFFIXES else "video",
+            "downloaded": record.get("downloaded") if isinstance(record.get("downloaded"), (int, float)) else st.st_mtime,
+        })
     out.sort(key=lambda x: x["downloaded"], reverse=True)
     FILES_CACHE.update(rev=rev, ts=time.time(), data=out, scan={
         "checked": FILE_SCAN_MAX_ENTRIES - budget[0], "media_count": len(out),
@@ -745,6 +858,17 @@ def open_file(path: Path) -> None:
         _open_with_os(path)
     except (OSError, subprocess.SubprocessError) as e:
         print(f"Cannot open file: {e}")
+
+
+def open_completed_download(action: str, relative: str) -> None:
+    """Revalidate a captured notification target; it may have moved since completion."""
+    if action not in {"play", "folder"}:
+        raise ValueError("Unknown notification action.")
+    path = LIBRARY.media_path(relative)
+    record = LIBRARY.load()["files"].get(path.relative_to(ROOT.resolve()).as_posix(), {})
+    if record.get("complete") is False or not path.stat().st_size:
+        raise ValueError("The completed file is no longer available.")
+    _open_with_os(path if action == "play" else path.parent)
 
 
 # ───────────────────────── Desktop notifications (window mode) ─────────────────────────
@@ -931,7 +1055,8 @@ def start_setup():
             return True, ""
         if not status["can_install"]:
             return False, "Automatic preparation is available in the Windows app. Open technical details for this device."
-        UPDATE.update(status="running", lines=[], before=installed_version(), after="", error="", extras="setup", restart_required=False)
+        UPDATE.update(status="running", lines=[], before=installed_version(), after="", error="", extras="setup",
+                      restart_required=False, setup_stage="checking")
     threading.Thread(target=_do_setup, daemon=True).start()
     return True, ""
 
@@ -947,6 +1072,7 @@ def _do_setup():
         if "js_runtime" in status["issues"]:
             names.append("deno")
         if names:
+            UPDATE["setup_stage"] = "media"
             folder = Path(__file__).resolve().parent
             command = [sys.executable, str(folder / "portable_bootstrap.py"), "--component-root", str(managed_component_root()),
                        "--manifest", str(folder / "portable_manifest.json"), "--components", ",".join(names)]
@@ -957,16 +1083,18 @@ def _do_setup():
                 raise ValueError("Could not prepare the media tools. Check your connection and try again.")
             configure_managed_components()
         if any(name in status["issues"] for name in ("ytdlp", "ejs", "impersonation")):
+            UPDATE["setup_stage"] = "sites"
             _do_update("default,deno", preparing=True)
             UPDATE["extras"] = "setup"
             if UPDATE["status"] == "error":
                 return
             UPDATE["restart_required"] = True
+        UPDATE["setup_stage"] = "verifying"
         for name in ("ffmpeg", "ffprobe"):
             if grab.media_tool_check(name)["status"] != "ok":
                 raise ValueError("The media tools could not start. Open technical details for help.")
         DOCTOR_CACHE["ts"] = 0.0
-        UPDATE.update(status="done", error="")
+        UPDATE.update(status="done", error="", setup_stage="ready")
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         UPDATE.update(status="error", error=str(error))
 
@@ -980,6 +1108,9 @@ def _do_update(extras: str = "default", *, preparing: bool = False) -> None:
     if os.environ.get("VIDEO_GRABBER_PORTABLE_ROOT"):
         package_dir = Path(sys.executable).resolve().parent / "Lib" / "site-packages"
         cmd[-1:-1] = ["--ignore-installed", "--target", str(package_dir)]
+    elif preparing and sys.prefix == sys.base_prefix and not sys.flags.no_user_site:
+        # Source installations should not need permission to modify a system-wide Python.
+        cmd.insert(-1, "--user")
     kw: dict = {}
     if sys.platform.startswith("win"):
         kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
@@ -1052,7 +1183,7 @@ finally { $dialog.Dispose() }
 def select_download_folder() -> dict:
     global PENDING_ROOT
     if not FOLDER_PICK_LOCK.acquire(blocking=False):
-        raise ValueError("The folder chooser is already open.")
+        raise ValueError("A file import or folder chooser is already running.")
     try:
         if active_jobs() or UPDATE["status"] == "running":
             raise ValueError("Finish or cancel queued downloads before changing the save folder.")
@@ -1097,6 +1228,8 @@ def restart_self() -> None:
     env = dict(os.environ, GRAB_WEBUI_RESTART="1", GRAB_RESTART_WINDOW="1" if WINDOW_MODE else "0")
     if sys.platform.startswith("win"):
         subprocess.Popen(argv, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)  # type: ignore[attr-defined]
+        if NATIVE_DESKTOP is not None:
+            NATIVE_DESKTOP.stop()
         os._exit(0)
     os.execve(sys.executable, argv, env)
 
@@ -1557,8 +1690,37 @@ class Handler(BaseHTTPRequestHandler):
         return data if isinstance(data, dict) else {}
 
     # —— Validation ——
+    def _discard_rejected_body(self) -> None:
+        """Avoid Windows resetting a rejected POST before the client receives its response."""
+        if self.command != "POST":
+            return
+        self.close_connection = True
+        try:
+            remaining = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return
+        if not 0 < remaining <= BODY_MAX_BYTES or self.headers.get("Transfer-Encoding"):
+            return
+        previous_timeout = self.connection.gettimeout()
+        deadline = time.monotonic() + 1
+        try:
+            while remaining:
+                timeout = deadline - time.monotonic()
+                if timeout <= 0:
+                    break
+                self.connection.settimeout(min(timeout, previous_timeout) if previous_timeout is not None else timeout)
+                chunk = self.rfile.read1(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass  # An incomplete rejected body must never reach an API handler.
+        finally:
+            self.connection.settimeout(previous_timeout)
+
     def _guard(self) -> bool:
         if not HOST_RE.match(self.headers.get("Host", "")):
+            self._discard_rejected_body()
             self._json({"error": "forbidden host"}, 403)
             return False
         return True
@@ -1566,37 +1728,34 @@ class Handler(BaseHTTPRequestHandler):
     def _authed(self, query: dict) -> bool:
         tok = self.headers.get("X-Token") or (query.get("t") or [""])[0]
         if not hmac.compare_digest(tok.encode(), TOKEN.encode()):
+            self._discard_rejected_body()
             self._json({"error": "Unauthorized, please refresh the page"}, 401)
             return False
         return True
 
     # —— Routing ——
-    def do_GET(self):
-        u = urlparse(self.path)
-        q = parse_qs(u.query)
-        if not self._guard():
-            return
-        if u.path == "/":
-            dist_page = render_dist_index()
-            if dist_page is not None:
-                csp = ("default-src 'self'; img-src http: https: data:; style-src 'self'; "
-                       "script-src 'self'; connect-src 'self'; media-src 'self'; frame-ancestors 'none'")
-                return self._send(200, dist_page, "text/html; charset=utf-8", {"Content-Security-Policy": csp})
-            page = INDEX_HTML.replace("__TOKEN__", TOKEN).encode("utf-8")
-            csp = ("default-src 'self'; img-src http: https: data:; style-src 'unsafe-inline'; "
-                   "script-src 'unsafe-inline'; connect-src 'self'; media-src 'self'; frame-ancestors 'none'")
-            return self._send(200, page, "text/html; charset=utf-8", {"Content-Security-Policy": csp})
-        if u.path.startswith("/assets/"):
-            # The browser requests these via <script>/<link> tags, which cannot carry X-Token,
-            # so this is public like "/" - the files are just the built app, nothing sensitive.
-            asset = read_static_asset(u.path.lstrip("/"))
-            if asset is None:
-                return self._json({"error": "not found"}, 404)
-            body, ctype = asset
-            return self._send(200, body, ctype, {"Cache-Control": "public, max-age=31536000, immutable"})
-        if not self._authed(q):
-            return
-        if u.path == "/api/state":
+    def _handle_root_page(self):
+        dist_page = render_dist_index()
+        if dist_page is not None:
+            csp = ("default-src 'self'; img-src http: https: data:; style-src 'self'; "
+                   "script-src 'self'; connect-src 'self'; media-src 'self'; frame-ancestors 'none'")
+            return self._send(200, dist_page, "text/html; charset=utf-8", {"Content-Security-Policy": csp})
+        page = INDEX_HTML.replace("__TOKEN__", TOKEN).encode("utf-8")
+        csp = ("default-src 'self'; img-src http: https: data:; style-src 'unsafe-inline'; "
+               "script-src 'unsafe-inline'; connect-src 'self'; media-src 'self'; frame-ancestors 'none'")
+        return self._send(200, page, "text/html; charset=utf-8", {"Content-Security-Policy": csp})
+
+    def _handle_library_get(self, path: str) -> bool:
+        if path == "/api/library/organizer":
+            self._json(ORGANIZER.snapshot())
+            return True
+        if path == "/api/library/trash":
+            self._json({"items": LIBRARY.trash_items()})
+            return True
+        return False
+
+    def _handle_jobs_get(self, path: str, q: dict) -> bool:
+        if path == "/api/state":
             views = [job.view(ROOT) for job in JOB_MANAGER.snapshot(newest_first=True)]
             try:
                 client_rev = int((q.get("rev") or ["-1"])[0])
@@ -1607,71 +1766,139 @@ class Handler(BaseHTTPRequestHandler):
                     "root": str(ROOT), "rev": FILES_REV, "jobs": views,
                     "queue_paused": QUEUE.paused, "queue_order": QUEUE.pending_ids(),
                     "window": WINDOW_MODE, "desktop_notifications": desktop_notifications_supported()}
+            if WINDOW_MODE and NATIVE_DESKTOP is not None:
+                data["native_notifications"] = {"enabled": NATIVE_DESKTOP.notifications_enabled,
+                                                 "available": NATIVE_DESKTOP.notifications_available}
             if client_rev != FILES_REV:
                 data["files"] = list_files(force=client_rev < 0)
                 data["library_scan"] = FILES_CACHE.get("scan")
                 data["collections"] = LIBRARY.collections()
-            return self._json(data)
-        m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/log", u.path)
+                data["smart_collections"] = LIBRARY.smart_collections()
+            self._json(data)
+            return True
+        m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/log", path)
         if m:
             job = JOB_MANAGER.get(m.group(1))
-            return self._json({"lines": list(job.log)[-200:] if job else []})
-        if u.path == "/api/doctor":
-            flag = lambda k: bool((q.get(k) or [""])[0])  # noqa: E731
-            return self._json(collect_doctor(net=flag("net"), force=flag("force")))
-        if u.path == "/api/cookies":
-            return self._json(cookies_status())
-        if u.path == "/api/subscriptions":
+            self._json({"lines": list(job.log)[-200:] if job else []})
+            return True
+        return False
+
+    def _handle_subscriptions_get(self, path: str) -> bool:
+        if path == "/api/subscriptions":
             subs = SUBSCRIPTION_MANAGER.snapshot(newest_first=True)
-            return self._json({"subscriptions": [subscription_view(s) for s in subs],
-                               "interval_seconds": SUB_INTERVAL_SECONDS})
-        if u.path == "/api/library/trash":
-            return self._json({"items": LIBRARY.trash_items()})
-        if u.path == "/api/setup":
-            return self._json(setup_status())
-        if u.path == "/api/ytdlp/check":
-            return self._json(check_ytdlp(force=bool((q.get("force") or [""])[0])))
-        if u.path == "/api/ytdlp/update-status":
+            self._json({"subscriptions": [subscription_view(s) for s in subs],
+                        "interval_seconds": SUB_INTERVAL_SECONDS})
+            return True
+        return False
+
+    def _handle_system_get(self, path: str, q: dict) -> bool:
+        if path == "/api/doctor":
+            flag = lambda k: bool((q.get(k) or [""])[0])  # noqa: E731
+            self._json(collect_doctor(net=flag("net"), force=flag("force")))
+            return True
+        if path == "/api/cookies":
+            self._json(cookies_status())
+            return True
+        if path == "/api/setup":
+            self._json(setup_status())
+            return True
+        if path == "/api/ytdlp/check":
+            self._json(check_ytdlp(force=bool((q.get("force") or [""])[0])))
+            return True
+        if path == "/api/ytdlp/update-status":
             with UPDATE_LOCK:
-                return self._json({k: (list(v) if isinstance(v, list) else v) for k, v in UPDATE.items()})
+                self._json({k: (list(v) if isinstance(v, list) else v) for k, v in UPDATE.items()})
+            return True
+        return False
+
+    def do_GET(self):
+        u = urlparse(self.path)
+        q = parse_qs(u.query)
+        if not self._guard():
+            return
+        if u.path == "/":
+            return self._handle_root_page()
+        if u.path.startswith("/assets/"):
+            asset = read_static_asset(u.path.lstrip("/"))
+            if asset is None:
+                return self._json({"error": "not found"}, 404)
+            body, ctype = asset
+            return self._send(200, body, ctype, {"Cache-Control": "public, max-age=31536000, immutable"})
+        if not self._authed(q):
+            return
+        if self._handle_library_get(u.path):
+            return
+        if self._handle_jobs_get(u.path, q):
+            return
+        if self._handle_system_get(u.path, q):
+            return
+        if self._handle_subscriptions_get(u.path):
+            return
         if u.path.startswith("/files/"):
             return self._file(unquote(u.path[len("/files/"):]))
         self._json({"error": "not found"}, 404)
 
-    def do_POST(self):
-        u = urlparse(self.path)
-        q = parse_qs(u.query)
-        if not self._guard() or not self._authed(q):
-            return
-        if "application/json" not in (self.headers.get("Content-Type") or ""):
+    def _handle_library_import(self, q: dict):
+        if (self.headers.get("Content-Type") or "").split(";")[0] != "application/octet-stream":
             return self._json({"error": "bad content type"}, 415)
-        body = self._body(COOKIES_MAX_BYTES if u.path == "/api/cookies" else BODY_MAX_BYTES)
+        try:
+            size = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            size = 0
+        if not 0 < size <= IMPORT_MAX_BYTES:
+            return self._json({"error": "Choose a non-empty media file up to 8 GiB."}, 413)
+        if not FOLDER_PICK_LOCK.acquire(blocking=False):
+            return self._json({"error": "A file import or folder chooser is already running."}, 409)
+        previous_timeout = self.connection.gettimeout()
+        try:
+            self.connection.settimeout(30)
+            result = LIBRARY.import_file((q.get("name") or [""])[0], self.rfile, size)
+            bump_rev()
+            return self._json(result)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+        except ValueError as error:
+            return self._json({"error": str(error)}, 400)
+        except FileExistsError:
+            return self._json({"error": "A file with that name already exists. Rename it before importing."}, 409)
+        except OSError:
+            return self._json({"error": "Could not import this file. Check permissions, available space and filename conflicts."}, 409)
+        finally:
+            self.connection.settimeout(previous_timeout)
+            FOLDER_PICK_LOCK.release()
 
-        if u.path == "/api/probe":
-            url = http_url(body.get("url"))
-            if not url:
-                return self._json({"error": "Please enter an http(s) URL"}, 400)
-            return self._json(probe(url, body.get("options") or {}))
+    def _handle_backup_post(self, path: str, body: dict) -> bool:
+        if path not in {"/api/backup/export", "/api/backup/preview", "/api/backup/restore"}:
+            return False
+        desktop = NATIVE_DESKTOP if WINDOW_MODE else None
+        service = BackupService(LIBRARY, CONFIG_DIR / "desktop.json", desktop.preferences_lock if desktop else SETTINGS_LOCK)
+        try:
+            if path.endswith("/export"):
+                defaults = {"close_behavior": desktop.close_behavior, "notifications_enabled": desktop.notifications_enabled} if desktop else None
+                self._json(service.export(body.get("preferences", {}), defaults))
+                return True
+            if path.endswith("/preview"):
+                self._json(service.preview(body.get("backup"), body.get("current", {})))
+                return True
+            result = service.restore(body.get("backup"), body.get("current", {}), body.get("review_token"))
+            if desktop:
+                desktop.reload_preferences()
+            bump_rev()
+            self._json(result)
+            return True
+        except ValueError as error:
+            self._json({"error": str(error)}, 400)
+            return True
+        except OSError:
+            logging.getLogger(__name__).exception("Backup operation failed. Check for retained restore recovery copies before retrying.")
+            self._json({"error": "Could not save restored data. Check permissions and available space, then preview again."}, 409)
+            return True
 
-        if u.path == "/api/download-folder/select":
+    def _handle_library_post(self, path: str, body: dict) -> bool:
+        if path == "/api/library/repair":
             try:
-                return self._json(select_download_folder())
-            except (ValueError, OSError, subprocess.SubprocessError) as error:
-                return self._json({"error": str(error)}, 409)
-
-        if u.path == "/api/open-url":
-            url = http_url(body.get("url"))
-            if not url:
-                return self._json({"error": "Please enter an http(s) URL"}, 400)
-            try:
-                return self._json({"ok": webbrowser.open(url)})
-            except OSError:
-                return self._json({"error": "Could not open it"}, 409)
-
-        if u.path == "/api/library/repair":
-            try:
-                path = LIBRARY.media_path(body.get("path"))
-                relative = path.relative_to(ROOT).as_posix()
+                p = LIBRARY.media_path(body.get("path"))
+                relative = p.relative_to(ROOT).as_posix()
                 record = library_records().get(relative, {})
                 if record.get("complete") is not False or not isinstance(record.get("repair_options"), dict):
                     raise ValueError("This item cannot be repaired locally. Download it again.")
@@ -1681,179 +1908,295 @@ class Handler(BaseHTTPRequestHandler):
                 options = {"_repair_path": relative, "mode": record["repair_options"].get("mode", "mp4")}
                 ids = create_jobs([url], options)
                 bump_rev()
-                return self._json({"ids": ids, "duplicates": not bool(ids)})
+                self._json({"ids": ids, "duplicates": not bool(ids)})
+                return True
             except FileNotFoundError as e:
-                return self._json({"error": str(e)}, 404)
+                self._json({"error": str(e)}, 404)
+                return True
             except (ValueError, OSError) as e:
-                return self._json({"error": str(e)}, 400)
+                self._json({"error": str(e)}, 400)
+                return True
 
-        if u.path in ("/api/library/organize", "/api/library/collections"):
+        if path in ("/api/library/details", "/api/library/playback"):
+            try:
+                if "root" in body and body["root"] != str(ROOT):
+                    raise ValueError("The library changed. Refresh before saving playback progress.")
+                if path.endswith("/details"):
+                    LIBRARY.describe(body.get("path"), body.get("tags"), body.get("note"))
+                else:
+                    LIBRARY.save_playback(body.get("path"), body.get("position"), body.get("duration"))
+                bump_rev()
+                self._json({"ok": True})
+                return True
+            except ValueError as error:
+                self._json({"error": str(error)}, 400)
+                return True
+            except OSError:
+                self._json({"error": "Could not save file details. Refresh Library and check folder permissions."}, 409)
+                return True
+
+        if path in ("/api/library/organize", "/api/library/collections", "/api/library/smart-collections"):
             try:
                 with QUEUE.mutex:
-                    if u.path.endswith("/organize"):
+                    if path.endswith("/organize"):
                         result = LIBRARY.organize(body.get("items"), favorite=body.get("favorite"),
                                                   collection_id=body.get("collection_id"), remove=body.get("remove", False))
+                    elif path.endswith("/smart-collections"):
+                        collection_id = LIBRARY.change_smart_collection(body.get("action"), body.get("name"),
+                                                                        body.get("id"), body.get("rules"))
+                        result = {"id": collection_id, "smart_collections": LIBRARY.smart_collections()}
                     else:
                         collection_id = LIBRARY.change_collection(body.get("action"), body.get("name"), body.get("id"))
                         result = {"id": collection_id, "collections": LIBRARY.collections()}
                 bump_rev()
-                return self._json(result)
+                self._json(result)
+                return True
             except ValueError as error:
-                return self._json({"error": str(error)}, 400)
+                self._json({"error": str(error)}, 400)
+                return True
             except OSError:
-                return self._json({"error": "Could not save Library organization. Check folder permissions and disk space."}, 409)
+                self._json({"error": "Could not save Library organization. Check folder permissions and disk space."}, 409)
+                return True
 
-        if u.path == "/api/library/batch":
+        if path in ("/api/library/organizer", "/api/library/organizer/recycle"):
+            try:
+                with QUEUE.mutex:
+                    if path.endswith("/recycle"):
+                        result = ORGANIZER.recycle(body.get("scan_id"), body.get("items"))
+                    elif body.get("action") == "start":
+                        result = ORGANIZER.start(entry_limit=FILE_SCAN_MAX_ENTRIES, max_depth=FILE_SCAN_MAX_DEPTH)
+                    elif body.get("action") == "cancel":
+                        result = ORGANIZER.cancel()
+                    else:
+                        raise ValueError("Choose a valid library check action.")
+                if path.endswith("/recycle") and result["processed"]:
+                    save_history()
+                    bump_rev()
+                self._json(result)
+                return True
+            except ValueError as error:
+                self._json({"error": str(error)}, 400)
+                return True
+            except OSError:
+                self._json({"error": "Files are unavailable or changed. Run a new check."}, 409)
+                return True
+
+        if path == "/api/library/batch":
             action, items = body.get("action"), body.get("items")
             if action not in ("trash", "restore", "purge") or not isinstance(items, list) or not 1 <= len(items) <= 200 or any(not isinstance(item, str) for item in items):
-                return self._json({"error": "Choose between 1 and 200 files and a valid action"}, 400)
+                self._json({"error": "Choose between 1 and 200 files and a valid action"}, 400)
+                return True
             processed, failed, recovery_ids = [], [], []
             with QUEUE.mutex:
                 if any(job.status == "running" for job in JOB_MANAGER.snapshot()):
-                    return self._json({"error": "Wait for running downloads to finish before editing files"}, 409)
-                records = library_records() if action == "trash" else {}
-                for item in dict.fromkeys(items):
-                    try:
-                        if action == "trash":
-                            recovery_id = LIBRARY.trash(item, complete=records.get(item, {}).get("complete"))
-                            recovery_ids.append(recovery_id)
-                        elif action == "restore":
-                            LIBRARY.restore(item)
-                        else:
-                            LIBRARY.purge(item)
-                        processed.append(item)
-                    except (ValueError, OSError) as error:
-                        failed.append({"item": item, "error": str(error)})
+                    self._json({"error": "Wait for running downloads to finish before editing files"}, 409)
+                    return True
+                if action == "trash":
+                    completions = {p: record.get("complete") for p, record in library_records().items()
+                                   if isinstance(record, dict)}
+                    result = LIBRARY.trash_many(items, completions=completions)
+                    processed, failed, recovery_ids = result["processed"], result["failed"], result["recovery_ids"]
+                else:
+                    for item in dict.fromkeys(items):
+                        try:
+                            if action == "restore":
+                                LIBRARY.restore(item)
+                            else:
+                                LIBRARY.purge(item)
+                            processed.append(item)
+                        except (ValueError, OSError) as error:
+                            failed.append({"item": item, "error": str(error)})
             save_history()
             bump_rev()
-            return self._json({"processed": processed, "failed": failed, "recovery_ids": recovery_ids})
+            self._json({"processed": processed, "failed": failed, "recovery_ids": recovery_ids})
+            return True
 
-        if u.path in ("/api/library/rename", "/api/library/trash", "/api/library/restore", "/api/library/purge"):
+        if path in ("/api/library/rename", "/api/library/trash", "/api/library/restore", "/api/library/purge"):
             try:
-                # Claiming and editing a file cannot overlap. Downloads already running finish first.
                 with QUEUE.mutex:
                     if any(job.status == "running" for job in JOB_MANAGER.snapshot()):
-                        return self._json({"error": "Wait for running downloads to finish before editing files"}, 409)
+                        self._json({"error": "Wait for running downloads to finish before editing files"}, 409)
+                        return True
                     completion = None
-                    if u.path.endswith(("/rename", "/trash")):
+                    if path.endswith(("/rename", "/trash")):
                         old = LIBRARY.media_path(body.get("path"))
                         for job in reversed(JOB_MANAGER.snapshot()):
-                            linked = next((path for path in job.files if Path(path).resolve() == old), None)
+                            linked = next((p for p in job.files if Path(p).resolve() == old), None)
                             if linked:
                                 completion = output_complete(old, job.status, job.media_metadata.get(linked, {}).get("complete"))
                                 break
-                    if u.path.endswith("/rename"):
+                    if path.endswith("/rename"):
                         relative = LIBRARY.rename(body.get("path"), body.get("name"), complete=completion)
                         new = str(ROOT / relative)
                         with JOB_MANAGER.lock:
                             for job in JOBS.values():
-                                linked = any(Path(path).resolve() == old for path in job.files)
-                                job.files = [new if Path(path).resolve() == old else path for path in job.files]
-                                job.seen_paths = [new if Path(path).resolve() == old else path for path in job.seen_paths]
-                                job.media_metadata = {new if Path(path).resolve() == old else path: info
-                                                      for path, info in job.media_metadata.items()}
+                                linked = any(Path(p).resolve() == old for p in job.files)
+                                job.files = [new if Path(p).resolve() == old else p for p in job.files]
+                                job.seen_paths = [new if Path(p).resolve() == old else p for p in job.seen_paths]
+                                job.media_metadata = {new if Path(p).resolve() == old else p: info
+                                                      for p, info in job.media_metadata.items()}
                                 if linked and isinstance(completion, bool):
                                     job.media_metadata.setdefault(new, {})["complete"] = completion
                         result = {"path": relative}
-                    elif u.path.endswith("/trash"):
+                    elif path.endswith("/trash"):
                         result = {"id": LIBRARY.trash(body.get("path"), complete=completion)}
-                    elif u.path.endswith("/purge"):
+                    elif path.endswith("/purge"):
                         LIBRARY.purge(str(body.get("id") or ""))
                         result = {"ok": True}
                     else:
                         result = {"path": LIBRARY.restore(str(body.get("id") or ""))}
                 save_history()
                 bump_rev()
-                return self._json(result)
+                self._json(result)
+                return True
             except FileNotFoundError as e:
-                return self._json({"error": str(e)}, 404)
+                self._json({"error": str(e)}, 404)
+                return True
             except FileExistsError as e:
-                return self._json({"error": str(e)}, 409)
+                self._json({"error": str(e)}, 409)
+                return True
             except ValueError as e:
-                return self._json({"error": str(e)}, 400)
+                self._json({"error": str(e)}, 400)
+                return True
             except OSError:
-                return self._json({"error": "Could not update the file. Check permissions and close any player using it."}, 409)
+                self._json({"error": "Could not update the file. Check permissions and close any player using it."}, 409)
+                return True
 
-        if u.path == "/api/jobs":
+        return False
+
+    def _handle_jobs_post(self, path: str, body: dict) -> bool:
+        if path == "/api/jobs":
             if UPDATE["status"] == "running":
-                return self._json({"error": "Currently updating yt-dlp, please add tasks later"}, 409)
+                self._json({"error": "Currently updating yt-dlp, please add tasks later"}, 409)
+                return True
             raw = body.get("urls") or []
             urls = list(dict.fromkeys(x.strip() for x in raw if isinstance(x, str) and http_url(x)))[:200]
             if not urls:
-                return self._json({"error": "No valid URLs found (requires http:// or https://)"}, 400)
-            ids = create_jobs(urls, body.get("options") or {})
-            return self._json({"ids": ids, "duplicates": len(urls) - len(ids)})
+                self._json({"error": "No valid URLs found (requires http:// or https://)"}, 400)
+                return True
+            options = body.get("options") or {}
+            if not isinstance(options, dict):
+                self._json({"error": "options must be an object"}, 400)
+                return True
+            action = body.get("existing_action")
+            if action not in (None, "skip", "download"):
+                self._json({"error": "Choose a valid existing download action"}, 400)
+                return True
+            matches = downloaded_matches(urls, options) if body.get("check_existing") is True else []
+            if matches and action is None:
+                exact_urls = {item["url"] for item in matches if item["settings_match"]}
+                preferred = [item for item in matches if item["url"] not in exact_urls or item["settings_match"]]
+                self._json({"ids": [], "duplicates": 0, "existing": preferred})
+                return True
+            skipped = set(item["url"] for item in matches) if action == "skip" else set()
+            if action == "download":
+                options = {**options, "_download_copy": True, "archive": False}
+            pending = [url for url in urls if url not in skipped]
+            ids = create_jobs(pending, options) if pending else []
+            if body.get("check_existing") is True:
+                self._json({"ids": ids, "duplicates": len(pending) - len(ids), "skipped_existing": len(skipped)})
+                return True
+            self._json({"ids": ids, "duplicates": len(urls) - len(ids)})
+            return True
 
-        if u.path == "/api/queue":
+        if path == "/api/queue":
             if not isinstance(body.get("paused"), bool):
-                return self._json({"error": "paused must be true or false"}, 400)
+                self._json({"error": "paused must be true or false"}, 400)
+                return True
             QUEUE.set_paused(body["paused"])
             save_history()
-            return self._json({"paused": QUEUE.paused})
+            self._json({"paused": QUEUE.paused})
+            return True
 
-        m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/retry-browser", u.path)
+        m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/retry-browser", path)
         if m:
             job = JOB_MANAGER.get(m[1])
             browser = body.get("browser")
             if not job:
-                return self._json({"error": "Task not found"}, 404)
+                self._json({"error": "Task not found"}, 404)
+                return True
             if not isinstance(browser, str) or browser not in BROWSERS:
-                return self._json({"error": "Choose a browser to use its sign-in session"}, 400)
+                self._json({"error": "Choose a browser to use its sign-in session"}, 400)
+                return True
             if job.status not in ("error", "canceled") or UPDATE["status"] == "running":
-                return self._json({"error": "This task cannot be retried right now"}, 409)
+                self._json({"error": "This task cannot be retried right now"}, 409)
+                return True
             retry = Job(job.url, {**job.options, "cookies_from_browser": browser, "use_cookies_file": False})
             retry.status, retry.source, retry.work_key = job.status, job.source, job.work_key
             retry.failed_items = [dict(item) for item in job.failed_items]
             ids = JOB_MANAGER.retry(retry)
             save_history()
             bump_rev()
-            return self._json({"ids": ids, "duplicates": not bool(ids)})
+            self._json({"ids": ids, "duplicates": not bool(ids)})
+            return True
 
-        if u.path == "/api/jobs/batch":
+        if path == "/api/jobs/batch":
             action, ids = body.get("action"), body.get("ids")
             if action not in ("cancel", "retry", "remove") or not isinstance(ids, list) or not ids:
-                return self._json({"error": "Choose an action and job IDs"}, 400)
+                self._json({"error": "Choose an action and job IDs"}, 400)
+                return True
             if len(ids) > HISTORY_MAX or any(not isinstance(i, str) or not re.fullmatch(r"[0-9a-f]{8}", i) for i in ids):
-                return self._json({"error": "Invalid job IDs"}, 400)
+                self._json({"error": "Invalid job IDs"}, 400)
+                return True
             if action == "retry" and UPDATE["status"] == "running":
-                return self._json({"error": "Currently updating yt-dlp, please retry later"}, 409)
+                self._json({"error": "Currently updating yt-dlp, please retry later"}, 409)
+                return True
             processed, skipped = JOB_MANAGER.batch(list(dict.fromkeys(ids)), action)
             save_history()
-            return self._json({"processed": processed, "skipped": skipped})
+            self._json({"processed": processed, "skipped": skipped})
+            return True
 
-        m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/(cancel|retry|remove|move-up|move-down)", u.path)
+        m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/(cancel|retry|remove|move-up|move-down)", path)
         if m:
             job, action = JOB_MANAGER.get(m.group(1)), m.group(2)
             if not job:
-                return self._json({"error": "Job not found"}, 404)
+                self._json({"error": "Job not found"}, 404)
+                return True
             if action.startswith("move-"):
                 if not QUEUE.move(job.id, -1 if action == "move-up" else 1):
-                    return self._json({"error": "Only waiting jobs can be reordered"}, 409)
+                    self._json({"error": "Only waiting jobs can be reordered"}, 409)
+                    return True
                 save_history()
             elif action == "cancel":
                 processed, _ = JOB_MANAGER.batch([job.id], "cancel")
                 if not processed:
-                    return self._json({"error": "Only queued or running jobs can be canceled"}, 409)
+                    self._json({"error": "Only queued or running jobs can be canceled"}, 409)
+                    return True
                 save_history()
             elif action == "retry":
                 if job.status not in ("error", "canceled"):
-                    return self._json({"error": "Only failed or canceled jobs can be retried"}, 409)
+                    self._json({"error": "Only failed or canceled jobs can be retried"}, 409)
+                    return True
                 if UPDATE["status"] == "running":
-                    return self._json({"error": "Currently updating yt-dlp, please retry later"}, 409)
+                    self._json({"error": "Currently updating yt-dlp, please retry later"}, 409)
+                    return True
                 ids = JOB_MANAGER.retry(job)
                 save_history()
-                return self._json({"ids": ids, "duplicates": not ids})
+                self._json({"ids": ids, "duplicates": not ids})
+                return True
             elif action == "remove":
                 if job.status not in ("done", "error", "canceled"):
-                    return self._json({"error": "Running jobs must be canceled before removal"}, 409)
+                    self._json({"error": "Running jobs must be canceled before removal"}, 409)
+                    return True
                 JOB_MANAGER.remove_finished(job.id)
                 save_history()
-            return self._json({"ok": True})
+            self._json({"ok": True})
+            return True
 
-        if u.path == "/api/subscriptions":
+        if path == "/api/clear":
+            JOB_MANAGER.clear_finished()
+            save_history()
+            self._json({"ok": True})
+            return True
+
+        return False
+
+    def _handle_subscriptions_post(self, path: str, body: dict) -> bool:
+        if path == "/api/subscriptions":
             url = http_url(body.get("url"))
             if not url:
-                return self._json({"error": "Please enter an http(s) URL"}, 400)
+                self._json({"error": "Please enter an http(s) URL"}, 400)
+                return True
             backfill = str(body.get("backfill") or "none")
             try:
                 backfill_count = int(body.get("backfill_count") or 5)
@@ -1861,30 +2204,36 @@ class Handler(BaseHTTPRequestHandler):
                 backfill_count = 5
             options = body.get("options") if isinstance(body.get("options"), dict) else {}
             if options.get("mode") in ("cover", "image"):
-                return self._json({"error": "Subscriptions currently support video and audio only."}, 400)
+                self._json({"error": "Subscriptions currently support video and audio only."}, 400)
+                return True
             sub = Subscription(url, options, backfill, backfill_count, body.get("filters"))
             SUBSCRIPTION_MANAGER.add(sub)
             save_subscriptions()
             start_subscription_check(sub)
-            return self._json(subscription_view(sub))
+            self._json(subscription_view(sub))
+            return True
 
-        m = re.fullmatch(r"/api/subscriptions/([0-9a-f]{8})/(update|check-now|preview|remove)", u.path)
+        m = re.fullmatch(r"/api/subscriptions/([0-9a-f]{8})/(update|check-now|preview|remove)", path)
         if m:
             sub, action = SUBSCRIPTION_MANAGER.get(m.group(1)), m.group(2)
             if not sub:
-                return self._json({"error": "Subscription not found"}, 404)
+                self._json({"error": "Subscription not found"}, 404)
+                return True
             if action == "update":
                 if isinstance(body.get("options"), dict) and body["options"].get("mode") in ("cover", "image"):
-                    return self._json({"error": "Subscriptions currently support video and audio only."}, 400)
+                    self._json({"error": "Subscriptions currently support video and audio only."}, 400)
+                    return True
                 if "enabled" in body:
                     if not isinstance(body["enabled"], bool):
-                        return self._json({"error": "enabled must be true or false"}, 400)
+                        self._json({"error": "enabled must be true or false"}, 400)
+                        return True
                     sub.enabled = bool(body["enabled"])
                 if "options" in body and isinstance(body["options"], dict):
                     sub.options = dict(body["options"])
                 if "filters" in body:
                     if not isinstance(body["filters"], dict):
-                        return self._json({"error": "filters must be an object"}, 400)
+                        self._json({"error": "filters must be an object"}, 400)
+                        return True
                     sub.filters = normalize_subscription_filters(body["filters"])
                 if body.get("backfill") in ("none", "recent"):
                     sub.backfill = body["backfill"]
@@ -1894,28 +2243,75 @@ class Handler(BaseHTTPRequestHandler):
                     except (TypeError, ValueError):
                         pass
                 save_subscriptions()
-                return self._json(subscription_view(sub))
+                self._json(subscription_view(sub))
+                return True
             if action == "check-now":
                 start_subscription_check(sub)
-                return self._json({"ok": True})
+                self._json({"ok": True})
+                return True
             if action == "preview":
                 if "filters" in body and not isinstance(body["filters"], dict):
-                    return self._json({"error": "filters must be an object"}, 400)
+                    self._json({"error": "filters must be an object"}, 400)
+                    return True
                 try:
-                    return self._json(preview_subscription(sub, body.get("filters", sub.filters)))
-                except Exception as e:  # noqa: BLE001 - extractor/network errors are user-facing diagnostics
-                    return self._json({"error": friendly_error(str(e))}, 502)
+                    self._json(preview_subscription(sub, body.get("filters", sub.filters)))
+                except Exception as e:  # noqa: BLE001
+                    self._json({"error": friendly_error(str(e))}, 502)
+                return True
             if action == "remove":
                 SUBSCRIPTION_MANAGER.remove(sub.id)
                 save_subscriptions()
-                return self._json({"ok": True})
+                self._json({"ok": True})
+                return True
 
-        if u.path == "/api/clear":
-            JOB_MANAGER.clear_finished()
-            save_history()
-            return self._json({"ok": True})
+        return False
 
-        if u.path == "/api/open-folder":
+    def _handle_system_post(self, path: str, body: dict) -> bool:
+        if path == "/api/probe":
+            url = http_url(body.get("url"))
+            if not url:
+                self._json({"error": "Please enter an http(s) URL"}, 400)
+                return True
+            self._json(probe(url, body.get("options") or {}))
+            return True
+
+        if path == "/api/download-folder/select":
+            try:
+                self._json(select_download_folder())
+            except (ValueError, OSError, subprocess.SubprocessError) as error:
+                self._json({"error": str(error)}, 409)
+            return True
+
+        if path == "/api/open-url":
+            url = http_url(body.get("url"))
+            if not url:
+                self._json({"error": "Please enter an http(s) URL"}, 400)
+                return True
+            try:
+                self._json({"ok": webbrowser.open(url)})
+            except OSError:
+                self._json({"error": "Could not open it"}, 409)
+            return True
+
+        if path == "/api/desktop/show":
+            view = body.get("view", "queue")
+            if view not in ("new", "queue", "library"):
+                self._json({"error": "Unsupported app view"}, 400)
+                return True
+            desktop = NATIVE_DESKTOP
+            if not WINDOW_MODE or desktop is None or desktop.exiting.is_set():
+                self._json({"opened": False})
+                return True
+            try:
+                desktop.show_main(view)
+            except Exception as exc:  # noqa: BLE001
+                print(f"Could not bring the desktop window forward: {exc}")
+                self._json({"error": "Could not open the main window. Use the tray menu to try again."}, 503)
+                return True
+            self._json({"opened": True})
+            return True
+
+        if path == "/api/open-folder":
             target = ROOT
             rel = str(body.get("path") or "")
             if rel:
@@ -1926,57 +2322,112 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     pass
             open_in_file_manager(target)
-            return self._json({"ok": True})
+            self._json({"ok": True})
+            return True
 
-        if u.path == "/api/open-file":
+        if path == "/api/open-file":
             rel = str(body.get("path") or "")
             if not rel:
-                return self._json({"error": "No file given"}, 400)
+                self._json({"error": "No file given"}, 400)
+                return True
             target = (ROOT / rel).resolve()
             try:
                 target.relative_to(ROOT)
             except ValueError:
-                return self._json({"error": "forbidden"}, 403)
+                self._json({"error": "forbidden"}, 403)
+                return True
             if not target.is_file() or target.suffix.lower() not in MEDIA_SUFFIX:
-                return self._json({"error": "File not found"}, 404)
+                self._json({"error": "File not found"}, 404)
+                return True
             open_file(target)
-            return self._json({"ok": True})
+            self._json({"ok": True})
+            return True
 
-        if u.path == "/api/notify":
+        if path == "/api/notify":
             if not desktop_notifications_supported():
-                return self._json({"ok": False})
+                self._json({"ok": False})
+                return True
             title = str(body.get("title") or "Video Grabber")[:120]
             message = str(body.get("body") or "")[:500]
-            return self._json({"ok": show_desktop_notification(title, message)})
+            self._json({"ok": show_desktop_notification(title, message)})
+            return True
 
-        if u.path == "/api/cookies":
+        if path == "/api/desktop/notifications":
+            if not WINDOW_MODE or NATIVE_DESKTOP is None or NATIVE_DESKTOP.exiting.is_set():
+                self._json({"error": "Desktop notifications are unavailable."}, 409)
+                return True
+            enabled = body.get("enabled")
+            if not isinstance(enabled, bool):
+                self._json({"error": "enabled must be a boolean"}, 400)
+                return True
+            try:
+                NATIVE_DESKTOP.set_notifications(enabled)
+            except OSError:
+                self._json({"error": "Could not save notification preferences."}, 500)
+                return True
+            self._json({"ok": True})
+            return True
+
+        if path == "/api/cookies":
             text = body.get("text")
             if not isinstance(text, str) or not text.strip():
-                return self._json({"error": "Empty file, or larger than 3 MB."}, 400)
+                self._json({"error": "Empty file, or larger than 3 MB."}, 400)
+                return True
             try:
-                return self._json(save_cookies(text))
+                self._json(save_cookies(text))
             except ValueError as e:
-                return self._json({"error": str(e)}, 400)
+                self._json({"error": str(e)}, 400)
             except OSError as e:
-                return self._json({"error": f"Could not save the file: {e}"}, 500)
+                self._json({"error": f"Could not save the file: {e}"}, 500)
+            return True
 
-        if u.path == "/api/cookies/delete":
+        if path == "/api/cookies/delete":
             delete_cookies()
-            return self._json({"present": False})
+            self._json({"present": False})
+            return True
 
-        if u.path == "/api/setup":
+        if path == "/api/setup":
             ok, error = start_setup()
-            return self._json({"ok": True} if ok else {"error": error}, 200 if ok else 409)
-        if u.path == "/api/ytdlp/update":
+            self._json({"ok": True} if ok else {"error": error}, 200 if ok else 409)
+            return True
+
+        if path == "/api/ytdlp/update":
             extras = body.get("extras") if body.get("extras") in ("default", "default,deno") else "default"
             ok, why = start_update(extras)
-            return self._json({"ok": True} if ok else {"error": why}, 200 if ok else 409)
+            self._json({"ok": True} if ok else {"error": why}, 200 if ok else 409)
+            return True
 
-        if u.path == "/api/restart":
-            if active_jobs() or UPDATE["status"] == "running":
-                return self._json({"error": "Tasks are still running, wait for them to finish before restarting."}, 409)
+        if path == "/api/restart":
+            if active_jobs() or UPDATE["status"] == "running" or FOLDER_PICK_LOCK.locked():
+                self._json({"error": "Tasks are still running, wait for them to finish before restarting."}, 409)
+                return True
             self._json({"ok": True})
             threading.Timer(0.5, restart_self).start()
+            return True
+
+        return False
+
+    def do_POST(self):
+        u = urlparse(self.path)
+        q = parse_qs(u.query)
+        if not self._guard() or not self._authed(q):
+            return
+        if u.path == "/api/library/import":
+            return self._handle_library_import(q)
+        if "application/json" not in (self.headers.get("Content-Type") or ""):
+            return self._json({"error": "bad content type"}, 415)
+        limit = BACKUP_MAX_BYTES + BODY_MAX_BYTES if u.path.startswith("/api/backup/") else COOKIES_MAX_BYTES if u.path == "/api/cookies" else BODY_MAX_BYTES
+        body = self._body(limit)
+
+        if self._handle_backup_post(u.path, body):
+            return
+        if self._handle_library_post(u.path, body):
+            return
+        if self._handle_jobs_post(u.path, body):
+            return
+        if self._handle_subscriptions_post(u.path, body):
+            return
+        if self._handle_system_post(u.path, body):
             return
 
         self._json({"error": "not found"}, 404)
@@ -2021,7 +2472,7 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(chunk)
                     left -= len(chunk)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
 
 
@@ -2032,835 +2483,16 @@ class Server(ThreadingHTTPServer):
 
 
 # ───────────────────────── Page ─────────────────────────
-INDEX_HTML = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Video Grabber WebUI</title>
-<link rel="icon" href="data:,">
-<style>
-:root{
-  --bg:#E7EBEE; --panel:#F6F8F9; --field:#FFFFFF; --ink:#16202A; --muted:#566573; --line:#C5CDD4;
-  --fill:#0E7A66; --on-fill:#FFFFFF; --fill-soft:rgba(14,122,102,.15);
-  --bad:#B3372B; --warn:#8A5300; --bad-soft:rgba(179,55,43,.12); --idle-soft:rgba(86,101,115,.12);
-  --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei UI","Segoe UI",system-ui,sans-serif;
-  color-scheme:light dark;
-}
-@media (prefers-color-scheme:dark){
-  :root{
-    --bg:#10161B; --panel:#172027; --field:#0E1418; --ink:#E5EBF0; --muted:#94A2AE; --line:#2B3641;
-    --fill:#3FCFA9; --on-fill:#08201A; --fill-soft:rgba(63,207,169,.16);
-    --bad:#F08A7E; --warn:#F2B84B; --bad-soft:rgba(240,138,126,.14); --idle-soft:rgba(148,162,174,.12);
-  }
-}
-*{box-sizing:border-box}
-[hidden]{display:none!important}
-html{background:var(--bg)}
-body{margin:0;color:var(--ink);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
-button,input,select,textarea{font:inherit;color:inherit}
-:focus-visible{outline:2px solid var(--fill);outline-offset:2px}
-.muted{color:var(--muted)} .small{font-size:13px}
-
-.top{display:flex;align-items:center;gap:16px;max-width:1180px;margin:0 auto;padding:22px 24px 6px}
-.top h1{margin:0;font-size:24px;font-weight:700;letter-spacing:.04em;flex:1}
-.banner{max-width:1180px;margin:8px auto 0;padding:10px 24px;background:var(--bad-soft);color:var(--bad);font-weight:600}
-.banner p{margin:0}
-
-.layout{display:grid;grid-template-columns:minmax(320px,380px) 1fr;gap:28px;max-width:1180px;margin:0 auto;padding:16px 24px 48px;align-items:start}
-@media (max-width:860px){.layout{grid-template-columns:1fr;padding:12px 16px 40px}.top{padding:18px 16px 4px}}
-
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;position:sticky;top:16px}
-@media (max-width:860px){.panel{position:static}}
-h2{margin:0 0 10px;font-size:16px;font-weight:700}
-.queue h2{margin-top:0}
-.queue section+section{margin-top:34px}
-.sec-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-.sec-head h2{margin:0}
-
-textarea,input[type=text],input[type=number],input[type=search],select{width:100%;background:var(--field);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
-textarea{resize:vertical;min-height:112px;line-height:1.5}
-label.f{display:block;margin:12px 0 4px;font-weight:600;font-size:14px}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.check{display:flex;align-items:center;gap:8px;margin:8px 0;cursor:pointer}
-.check input{width:16px;height:16px;accent-color:var(--fill)}
-.sub{margin:2px 0 0 24px}
-.group{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
-details.adv{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
-details.adv summary{cursor:pointer;font-weight:600}
-
-.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--field);margin-top:14px;position:relative}
-.seg input{position:absolute;opacity:0;pointer-events:none}
-.seg label{padding:9px 10px;text-align:center;cursor:pointer;font-weight:600}
-.seg input:checked+label{background:var(--fill);color:var(--on-fill)}
-.seg input:focus-visible+label{outline:2px solid var(--ink);outline-offset:-3px}
-body[data-mode="mp3"] .only-mp4{display:none}
-body:not([data-mode="mp3"]) .only-mp3{display:none}
-
-.btn{border:1px solid var(--line);background:var(--field);border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:600}
-.btn:hover{border-color:var(--muted)}
-.btn.primary{background:var(--fill);border-color:var(--fill);color:var(--on-fill)}
-.btn.primary:hover{filter:brightness(1.06)}
-.btn.small{padding:4px 10px;font-size:13px}
-.btn:disabled{opacity:.5;cursor:default}
-.actions{display:flex;gap:10px;margin-top:18px}
-.actions .primary{flex:1}
-
-#probe{margin-top:10px;padding:10px 12px;background:var(--field);border:1px solid var(--line);border-radius:6px;font-size:14px}
-#probe p{margin:0}
-.pr-head{display:flex;gap:10px;align-items:flex-start}
-.pr-head img{width:96px;height:54px;object-fit:cover;border-radius:4px;flex:none;background:var(--idle-soft)}
-.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
-.chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:1px 10px;cursor:pointer;font-size:13px}
-.chip:hover{border-color:var(--fill);color:var(--fill)}
-#probe ul{margin:6px 0 0;padding-left:18px}
-#probe li{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.err{color:var(--bad)}
-
-.list{border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}
-.empty{padding:18px 16px;color:var(--muted)}
-.job{position:relative;padding:14px 16px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:2px 16px;isolation:isolate}
-.job.first{border-top:0}
-.job::before{content:"";position:absolute;inset:0 auto 0 0;width:var(--p,0%);background:var(--fill-soft);transition:width .8s linear;z-index:-1}
-.job[data-status="error"]::before{width:100%;background:var(--bad-soft)}
-.job[data-status="canceled"]::before,.job[data-status="queued"]::before{width:100%;background:var(--idle-soft)}
-.job[data-status="done"]::before{width:100%}
-.job-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.job-meta{display:flex;flex-wrap:wrap;gap:2px 14px;font-size:13px;color:var(--muted);min-height:20px}
-.job-err{color:var(--bad);font-size:14px;margin-top:4px}
-.job-files{display:flex;flex-direction:column;gap:2px;margin-top:4px;font-size:14px}
-.job-files a,.file a{color:var(--fill);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.job-files a:hover,.file a:hover{text-decoration:underline}
-.job-side{grid-column:2;grid-row:1 / span 3;display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;gap:8px}
-.pct{font-size:28px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums;min-width:3ch;text-align:right}
-.pct.word{font-size:15px;font-weight:600;color:var(--muted)}
-.job[data-status="error"] .pct{color:var(--bad)}
-.job[data-status="done"] .pct{color:var(--fill)}
-.job-btns{display:flex;gap:6px}
-.job-log{grid-column:1 / -1;margin-top:6px;font-size:13px}
-.job-log summary{cursor:pointer;color:var(--muted);width:max-content}
-.job-log pre{margin:6px 0 0;padding:10px;max-height:240px;overflow:auto;background:var(--field);border:1px solid var(--line);border-radius:6px;font:12px/1.5 ui-monospace,"Cascadia Mono",Consolas,monospace;white-space:pre-wrap;word-break:break-all}
-
-.file{display:flex;align-items:center;gap:14px;padding:10px 16px;border-top:1px solid var(--line)}
-.file:first-child{border-top:0}
-.file a{flex:1;min-width:0}
-.file span{font-size:13px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
-
-.top{flex-wrap:wrap}
-.top h1{white-space:nowrap}
-.btn.attn{border-color:var(--fill);color:var(--fill)}
-.ta-tools{display:flex;align-items:center;gap:10px;margin-top:6px}
-.ta-tools span{flex:1;min-width:0}
-textarea.flash{animation:flash 1.2s ease-out}
-@keyframes flash{0%{box-shadow:0 0 0 3px var(--fill)}100%{box-shadow:0 0 0 0 transparent}}
-.upd{grid-column:1 / -1;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px}
-.upd-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
-.upd-row p{margin:0;flex:1;min-width:220px;font-weight:600}
-.upd pre{margin:10px 0 0;max-height:200px;overflow:auto;padding:10px;background:var(--field);border:1px solid var(--line);border-radius:6px;font:12px/1.5 ui-monospace,"Cascadia Mono",Consolas,monospace;white-space:pre-wrap;word-break:break-all}
-.filters{display:flex;gap:10px;align-items:center;margin-bottom:8px}
-.filters input{flex:1;min-width:0}
-.filters select{width:auto}
-.sec-tools{display:flex;gap:8px;align-items:center}
-#drop{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(14,122,102,.86);color:#fff;font-size:22px;font-weight:700;pointer-events:none}
-.banner.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.banner.row p{flex:1;min-width:220px}
-.banner.warnb{background:rgba(180,120,0,.14);color:var(--warn)}
-.badge{display:inline-block;min-width:66px;text-align:center;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:700;border:1px solid var(--line);color:var(--muted);height:fit-content}
-.badge.ok{color:var(--fill);border-color:var(--fill)}
-.badge.warn{color:var(--warn);border-color:var(--warn)}
-.badge.error{color:var(--bad);border-color:var(--bad)}
-.doc-list{margin-top:8px}
-.doc-row{display:grid;grid-template-columns:72px 1fr;gap:4px 12px;padding:10px 0;border-top:1px solid var(--line)}
-.doc-row:first-child{border-top:0}
-.doc-row .lbl{font-weight:600}
-.doc-row .det{font-size:14px;color:var(--muted);overflow-wrap:anywhere}
-.doc-fix{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px}
-.doc-fix code{background:var(--field);border:1px solid var(--line);border-radius:6px;padding:2px 8px;font:12px ui-monospace,"Cascadia Mono",Consolas,monospace;overflow-wrap:anywhere}
-.job-note{color:var(--warn);font-size:13px;margin-top:4px;white-space:pre-line}
-.cookie-box{margin-top:6px;padding:8px 10px;background:var(--field);border:1px solid var(--line);border-radius:6px}
-.cookie-box p{margin:0 0 6px}
-.cookie-actions{display:flex;gap:8px;align-items:center;margin-bottom:6px}
-#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:6px;font-weight:600;max-width:90vw;z-index:10}
-#toast.bad{background:var(--bad);color:#fff}
-@media (prefers-reduced-motion:reduce){.job::before{transition:none}}
-</style>
-</head>
-<body data-mode="mp4">
-<header class="top">
-  <h1>Video Grabber WebUI</h1>
-  <span id="ver" class="muted small"></span>
-  <button class="btn small" id="docBtn" type="button">Diagnostics</button>
-  <button class="btn small" id="updBtn" type="button">Check for Updates</button>
-  <button class="btn small" id="notifyBtn" type="button">Enable Completion Notifications</button>
-  <button class="btn small" id="openDir" type="button">Open Download Folder</button>
-</header>
-<div class="banner" id="notice" hidden><p>ffmpeg not found: merging audio/video and MP3 conversion will fail. Please restart after installing.</p></div>
-<div class="banner warnb row" id="envNotice" hidden>
-  <p id="envMsg"></p>
-  <button class="btn small" id="envOpen" type="button">Open Diagnostics</button>
-  <button class="btn small" id="envDismiss" type="button">Dismiss</button>
-</div>
-<div class="banner" id="offline" hidden><p>Disconnected from local service, please ensure webui.py is running.</p></div>
-
-<main class="layout">
-  <section class="upd" id="upd" hidden aria-label="Update yt-dlp">
-    <div class="upd-row">
-      <p id="updMsg"></p>
-      <button class="btn small primary" id="updDo" type="button" hidden>Update</button>
-      <button class="btn small primary" id="updRestart" type="button" hidden>Restart Service</button>
-      <button class="btn small" id="updClose" type="button">Collapse</button>
-    </div>
-    <pre id="updLog" hidden></pre>
-  </section>
-  <section class="upd" id="doctor" hidden aria-label="Diagnostics">
-    <div class="upd-row">
-      <p>Diagnostics</p>
-      <button class="btn small" id="docRecheck" type="button">Re-check</button>
-      <button class="btn small" id="docNet" type="button">Test network</button>
-      <button class="btn small" id="docCopy" type="button">Copy report</button>
-      <button class="btn small" id="docClose" type="button">Close</button>
-    </div>
-    <div class="doc-list" id="docList"></div>
-    <p class="muted small" style="margin:8px 0 0">The report hides your home folder and proxy passwords, but it includes your most recent failed links and log lines. Read it before sharing.</p>
-  </section>
-  <section class="panel" aria-label="New Download">
-    <h2>New Download</h2>
-    <textarea id="urls" placeholder="Paste URLs, one per line. Supports video pages, playlists, mp4 and m3u8 direct links" spellcheck="false"></textarea>
-    <div class="ta-tools">
-      <button class="btn small" id="pasteBtn" type="button">Read Clipboard</button>
-      <span class="muted small">Or press Ctrl+V, or drag and drop txt files/links into the page</span>
-    </div>
-    <div id="probe" hidden></div>
-
-    <div class="seg" role="radiogroup" aria-label="Output Format">
-      <input type="radio" name="mode" id="m-mp4" value="mp4" checked><label for="m-mp4">MP4 Video</label>
-      <input type="radio" name="mode" id="m-mp3" value="mp3"><label for="m-mp3">MP3 Audio</label>
-    </div>
-
-    <div class="only-mp4">
-      <label class="f" for="quality">Max Quality</label>
-      <select id="quality">
-        <option value="best">Best Quality</option><option value="2160">2160p (4K)</option><option value="1440">1440p</option>
-        <option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option><option value="360">360p</option>
-      </select>
-    </div>
-    <div class="only-mp3">
-      <label class="f" for="abr">Audio Quality</label>
-      <select id="abr">
-        <option value="320">320 kbps</option><option value="256">256 kbps</option><option value="192" selected>192 kbps</option>
-        <option value="128">128 kbps</option><option value="96">96 kbps</option>
-      </select>
-    </div>
-
-    <div class="group">
-      <label class="check"><input type="checkbox" id="subs">Download Subtitles</label>
-      <div class="sub" id="subOpts" hidden>
-        <label class="f" for="subLangs" style="margin-top:4px">Subtitle Languages</label>
-        <input type="text" id="subLangs" value="zh-Hans,zh-Hant,zh,en" spellcheck="false">
-        <label class="check"><input type="checkbox" id="autoSubs">Use auto-generated if manual subtitles are unavailable</label>
-        <label class="check only-mp4"><input type="checkbox" id="embedSubs">Embed into MP4 (keep .srt)</label>
-      </div>
-      <label class="check"><input type="checkbox" id="cover">Download cover and embed into file</label>
-      <label class="check sub" id="keepCoverRow" hidden><input type="checkbox" id="keepCover">Keep an extra jpg cover file</label>
-    </div>
-
-    <div class="group">
-      <label class="check"><input type="checkbox" id="noPlaylist">If URL contains a playlist, download only this video</label>
-      <label class="f" for="items" style="margin-top:6px">Playlist range (leave empty for all)</label>
-      <input type="text" id="items" placeholder="e.g., 1-5,8" spellcheck="false">
-    </div>
-
-    <details class="adv">
-      <summary>Advanced Settings</summary>
-      <label class="f" for="cookieSrc">Cookies (for logged-in or member-only videos)</label>
-      <select id="cookieSrc">
-        <option value="">None</option>
-        <option value="file" disabled>Uploaded cookies.txt</option>
-        <optgroup label="Read from a browser">
-          <option>chrome</option><option>edge</option><option>firefox</option><option>brave</option>
-          <option>chromium</option><option>opera</option><option>vivaldi</option><option>safari</option>
-        </optgroup>
-      </select>
-      <div class="cookie-box">
-        <p class="muted small" id="cookieStatus">No cookies.txt uploaded.</p>
-        <div class="cookie-actions">
-          <button class="btn small" id="cookieUp" type="button">Upload cookies.txt</button>
-          <button class="btn small" id="cookieDel" type="button" hidden>Remove</button>
-          <input type="file" id="cookieFile" accept=".txt,text/plain" hidden>
-        </div>
-        <p class="muted small">Reading cookies straight from Chrome or Edge can fail on Windows while the browser is open; an exported cookies.txt avoids that. YouTube rotates account cookies, so export from a private window and do not reuse that window afterwards
-          (<a href="https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies" target="_blank" rel="noopener">how to export</a>). The file is stored outside your download folder and every run works on its own copy.</p>
-      </div>
-      <label class="f" for="referer">Referer (for hotlink protection)</label>
-      <input type="text" id="referer" placeholder="https://example.com/" spellcheck="false">
-      <label class="f" for="proxy">Proxy</label>
-      <input type="text" id="proxy" placeholder="http://127.0.0.1:7890" spellcheck="false">
-      <div class="row">
-        <div><label class="f" for="limit">Rate Limit</label><input type="text" id="limit" placeholder="e.g., 2M" spellcheck="false"></div>
-        <div><label class="f" for="threads">Concurrent Fragments</label><input type="number" id="threads" min="1" max="16" value="4"></div>
-      </div>
-      <label class="f" for="sleep">Wait between downloads (seconds)</label>
-      <input type="number" id="sleep" min="0" max="60" step="0.5" value="0">
-      <label class="check"><input type="checkbox" id="archive">Skip already downloaded videos</label>
-      <label class="check"><input type="checkbox" id="allSniffed">Download all when multiple video URLs are found on the page</label>
-      <label class="check"><input type="checkbox" id="jsRender" disabled>If no video is found, render page with headless browser to grab</label>
-      <p class="muted small sub" id="jsHint" style="margin-top:0"></p>
-    </details>
-
-    <div class="actions">
-      <button class="btn" id="probeBtn" type="button">Parse URL</button>
-      <button class="btn primary" id="start" type="button">Start Download</button>
-    </div>
-  </section>
-
-  <div class="queue">
-    <section aria-label="Queue">
-      <div class="sec-head"><h2>Queue</h2><div class="sec-tools"><span id="count" class="muted small"></span><button class="btn small" id="clearBtn" type="button">Clear Finished</button></div></div>
-      <div class="filters">
-        <input type="search" id="q" placeholder="Search title, URL, or filename" spellcheck="false">
-        <select id="flt" aria-label="Filter by status">
-          <option value="all">All</option><option value="active">Active</option><option value="done">Done</option><option value="bad">Failed or Canceled</option>
-        </select>
-      </div>
-      <div class="list">
-        <div id="jobsEmpty" class="empty">Queue is empty. Paste a URL and click 'Start Download'.</div>
-        <div id="jobsNoMatch" class="empty" hidden>No matching tasks.</div>
-        <div id="jobs"></div>
-      </div>
-    </section>
-    <section aria-label="Downloaded Files">
-      <div class="sec-head"><h2>Downloaded Files</h2><button class="btn small" id="refreshFiles" type="button">Refresh</button></div>
-      <div class="list">
-        <div id="filesEmpty" class="empty">No completed files yet.</div>
-        <div id="files"></div>
-      </div>
-    </section>
-  </div>
-</main>
-<div id="drop" hidden>Release mouse to add links inside</div>
-<div id="toast" hidden></div>
-
-<script>
-const TOKEN = "__TOKEN__";
-const $ = s => document.querySelector(s);
-const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-
-async function api(path, body) {
-  const r = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
-    headers: {"X-Token": TOKEN, "Content-Type": "application/json"},
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || r.statusText);
-  return data;
-}
-
-let toastTimer;
-function toast(msg, bad) {
-  const t = $("#toast");
-  t.textContent = msg; t.className = bad ? "bad" : ""; t.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 3200);
-}
-
-const fmtSize = n => n >= 1073741824 ? (n / 1073741824).toFixed(2) + " GB" : n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
-const fmtDur = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0"); };
-const fileUrl = p => "/files/" + p.split("/").map(encodeURIComponent).join("/") + "?t=" + encodeURIComponent(TOKEN);
-
-// ── Form ──
-function readOptions() {
-  return {
-    mode: document.querySelector("input[name=mode]:checked").value,
-    quality: $("#quality").value, abr: +$("#abr").value,
-    subs: $("#subs").checked, sub_langs: $("#subLangs").value.trim(),
-    auto_subs: $("#autoSubs").checked, embed_subs: $("#embedSubs").checked,
-    cover: $("#cover").checked, keep_cover: $("#keepCover").checked,
-    no_playlist: $("#noPlaylist").checked, items: $("#items").value.trim(),
-    archive: $("#archive").checked, cookies_from_browser: ["", "file"].includes($("#cookieSrc").value) ? "" : $("#cookieSrc").value,
-    use_cookies_file: $("#cookieSrc").value === "file",
-    referer: $("#referer").value.trim(), proxy: $("#proxy").value.trim(),
-    limit_rate: $("#limit").value.trim(), threads: +$("#threads").value || 4,
-    sleep: +$("#sleep").value || 0, all_sniffed: $("#allSniffed").checked,
-    js_render: $("#jsRender").checked && !$("#jsRender").disabled
-  };
-}
-function syncForm() {
-  document.body.dataset.mode = document.querySelector("input[name=mode]:checked").value;
-  $("#subOpts").hidden = !$("#subs").checked;
-  $("#keepCoverRow").hidden = !$("#cover").checked;
-}
-function saveOptions() { try { localStorage.setItem("grab-options", JSON.stringify(readOptions())); } catch (e) {} }
-function setQuality(v) {
-  const sel = $("#quality");
-  v = String(v);
-  if (![...sel.options].some(o => o.value === v)) {
-    const o = el("option", null, v + "p"); o.value = v; sel.append(o);
-  }
-  sel.value = v;
-}
-function restoreOptions() {
-  let o = null;
-  try { o = JSON.parse(localStorage.getItem("grab-options") || "null"); } catch (e) {}
-  if (!o) return;
-  const set = (id, v) => { if (v !== undefined && v !== null) $(id).value = v; };
-  const chk = (id, v) => { if (v !== undefined) $(id).checked = !!v; };
-  (document.querySelector("input[name=mode][value=" + (o.mode === "mp3" ? "mp3" : "mp4") + "]")).checked = true;
-  if (o.quality) setQuality(o.quality);
-  set("#abr", o.abr); set("#subLangs", o.sub_langs); set("#items", o.items); wantFileCookies = !!o.use_cookies_file; set("#cookieSrc", o.use_cookies_file ? "" : o.cookies_from_browser);
-  set("#referer", o.referer); set("#proxy", o.proxy); set("#limit", o.limit_rate); set("#threads", o.threads); set("#sleep", o.sleep);
-  chk("#subs", o.subs); chk("#autoSubs", o.auto_subs); chk("#embedSubs", o.embed_subs); chk("#cover", o.cover);
-  chk("#keepCover", o.keep_cover); chk("#noPlaylist", o.no_playlist); chk("#archive", o.archive); chk("#allSniffed", o.all_sniffed);
-  chk("#jsRender", o.js_render);
-}
-document.querySelectorAll("input,select").forEach(e => e.addEventListener("change", () => { syncForm(); saveOptions(); }));
-
-const readUrls = () => $("#urls").value.split("\n").map(s => s.trim()).filter(s => s && !s.startsWith("#"));
-
-$("#start").onclick = async () => {
-  const urls = readUrls();
-  if (!urls.length) return toast("Paste at least one URL first", true);
-  try {
-    const r = await api("/api/jobs", {urls, options: readOptions()});
-    $("#urls").value = ""; $("#probe").hidden = true;
-    toast("Added to queue: " + r.ids.length + " links");
-    poll();
-  } catch (e) { toast(e.message, true); }
-};
-
-$("#probeBtn").onclick = async () => {
-  const urls = readUrls();
-  if (!urls.length) return toast("Paste a URL first", true);
-  const box = $("#probe"); box.hidden = false;
-  box.replaceChildren(el("p", "muted", "Parsing " + (urls.length > 1 ? "the first link " : "") + "..." + (readOptions().js_render ? " (Page rendering enabled, this may take a few seconds)" : "")));
-  $("#probeBtn").disabled = true;
-  try { renderProbe(await api("/api/probe", {url: urls[0], options: readOptions()})); }
-  catch (e) { box.replaceChildren(el("p", "err", e.message)); }
-  finally { $("#probeBtn").disabled = false; }
-};
-
-function renderProbe(r) {
-  const box = $("#probe"); box.replaceChildren();
-  if (r.error) { box.append(el("p", "err", r.error)); return; }
-  if (r.kind === "video") {
-    const head = el("div", "pr-head");
-    if (r.thumbnail) { const im = el("img"); im.src = r.thumbnail; im.alt = ""; im.referrerPolicy = "no-referrer"; head.append(im); }
-    const t = el("div"); t.append(el("strong", null, r.title || "(No title)"));
-    const meta = [r.uploader, r.duration ? fmtDur(r.duration) : "", r.extractor].filter(Boolean).join("   ");
-    if (meta) t.append(el("div", "muted small", meta));
-    head.append(t); box.append(head);
-    if (r.heights && r.heights.length) {
-      const row = el("div", "chips"); row.append(el("span", "muted small", "Quality Options"));
-      r.heights.slice(0, 6).forEach(h => {
-        const b = el("button", "chip", h + "p"); b.type = "button";
-        b.onclick = () => { setQuality(h); $("#m-mp4").checked = true; syncForm(); saveOptions(); toast("Max quality set to " + h + "p"); };
-        row.append(b);
-      });
-      box.append(row);
-    }
-  } else if (r.kind === "playlist") {
-    box.append(el("strong", null, r.title || "Playlist"));
-    box.append(el("div", "muted small", "Total " + r.count + " items. You can limit the range in 'Playlist range' below."));
-    if (r.items && r.items.length) { const ul = el("ul"); r.items.forEach(x => ul.append(el("li", null, x))); box.append(ul); }
-  } else if (r.kind === "page") {
-    box.append(el("strong", null, r.title || "Webpage"));
-    box.append(el("div", "muted small", r.rendered
-      ? "Captured " + r.count + " media requests when loading page with headless browser, will try each sequentially when downloading."
-      : "yt-dlp lacks a dedicated extractor, but found " + r.count + " media URLs in the page, will try each sequentially when downloading."));
-    const ul = el("ul"); r.sources.forEach(x => ul.append(el("li", null, x))); box.append(ul);
-  }
-}
-
-// ── Queue ──
-const nodes = new Map(), openLogs = new Set();
-
-function makeJob(j) {
-  const n = el("article", "job"); n.dataset.id = j.id;
-  const main = el("div"); main.style.minWidth = "0";
-  main.append(el("div", "job-title"), el("div", "job-meta"), el("div", "job-files"), el("div", "job-err"), el("div", "job-note"));
-  const side = el("div", "job-side"); side.append(el("div", "pct"), el("div", "job-btns"));
-  const log = el("details", "job-log"); log.append(el("summary", null, "Log"), el("pre"));
-  log.addEventListener("toggle", () => { if (log.open) { openLogs.add(j.id); refreshLog(j.id); } else openLogs.delete(j.id); });
-  n.append(main, side, log);
-  return n;
-}
-async function refreshLog(id) {
-  const n = nodes.get(id); if (!n) return;
-  try {
-    const r = await api("/api/jobs/" + id + "/log");
-    const pre = n.querySelector("pre");
-    const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
-    pre.textContent = r.lines.join("\n");
-    if (atEnd) pre.scrollTop = pre.scrollHeight;
-  } catch (e) {}
-}
-async function act(id, what, msg) {
-  try { await api("/api/jobs/" + id + "/" + what, {}); if (msg) toast(msg); poll(); } catch (e) { toast(e.message, true); }
-}
-const fmtTime = t => new Date(t * 1000).toLocaleString([], {month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"});
-function updateJob(n, j) {
-  n._job = j;
-  n.dataset.status = j.status;
-  n.style.setProperty("--p", (j.status === "done" ? 100 : j.percent) + "%");
-  const title = n.querySelector(".job-title"); title.textContent = j.title || j.url; title.title = j.url;
-
-  const meta = n.querySelector(".job-meta"); meta.replaceChildren();
-  const bits = j.status === "running" ? [j.stage, j.item && "Item " + j.item, j.speed, j.eta && "ETA " + j.eta]
-    : [j.status === "queued" ? "Queued" : j.item && "Total " + j.item.split("/")[1], j.stage === "Last incomplete" && j.stage, j.finished && fmtTime(j.finished)];
-  bits.filter(Boolean).forEach(t => meta.append(el("span", null, t)));
-
-  const pct = n.querySelector(".pct");
-  const word = {queued: "Wait", done: "Done", error: "Failed", canceled: "Canceled"}[j.status];
-  pct.textContent = word || Math.round(j.percent) + "%";
-  pct.classList.toggle("word", !!word && j.status !== "done");
-
-  n.querySelector(".job-err").textContent = j.status === "error" ? j.error : "";
-  n.querySelector(".job-note").textContent = (j.notes || []).map(t => "Note: " + t).join("\n");
-
-  const fk = JSON.stringify(j.files), files = n.querySelector(".job-files");
-  if (files.dataset.k !== fk) {
-    files.dataset.k = fk; files.replaceChildren();
-    j.files.forEach(f => { const a = el("a", null, f.name); a.href = fileUrl(f.path); a.target = "_blank"; a.rel = "noopener"; a.title = "Play in new tab"; files.append(a); });
-  }
-
-  const btns = n.querySelector(".job-btns"), bk = j.status + (j.stage === "Canceling…" ? "!" : "");
-  if (btns.dataset.k !== bk) {
-    btns.dataset.k = bk; btns.replaceChildren();
-    const add = (label, fn, dis) => { const b = el("button", "btn small", label); b.type = "button"; b.disabled = !!dis; b.onclick = fn; btns.append(b); };
-    if (j.status === "queued" || j.status === "running") add(j.stage === "Canceling…" ? "Canceling" : "Cancel", () => act(j.id, "cancel"), j.stage === "Canceling…");
-    if (j.status === "done" && j.files.length) add("Open Folder", () => api("/api/open-folder", {path: j.files[0].path}).catch(e => toast(e.message, true)));
-    if (j.status === "error" || j.status === "canceled") add("Retry", () => act(j.id, "retry", "Re-added to queue"));
-    if (["done", "error", "canceled"].includes(j.status)) add("Remove", () => act(j.id, "remove"));
-  }
-}
-function renderJobs(list) {
-  const wrap = $("#jobs");
-  const seen = new Set(list.map(j => j.id));
-  list.forEach(j => { let n = nodes.get(j.id); if (!n) { n = makeJob(j); nodes.set(j.id, n); } updateJob(n, j); });
-  for (const [id, n] of nodes) if (!seen.has(id)) { n.remove(); nodes.delete(id); openLogs.delete(id); }
-  let ref = wrap.firstElementChild;
-  for (const j of list) { const n = nodes.get(j.id); if (n === ref) ref = ref.nextElementSibling; else wrap.insertBefore(n, ref); }
-  openLogs.forEach(refreshLog);
-  applyFilter();
-}
-let filterQ = "", filterS = "all", lastFiles = [];
-function renderFiles(list) { lastFiles = list; renderFileRows(); }
-function renderFileRows() {
-  const box = $("#files"); box.replaceChildren();
-  const q = filterQ.trim().toLowerCase();
-  const list = q ? lastFiles.filter(f => f.path.toLowerCase().includes(q)) : lastFiles;
-  const empty = $("#filesEmpty");
-  empty.hidden = list.length > 0;
-  empty.textContent = lastFiles.length && !list.length ? "No matching files." : "No completed files yet.";
-  list.forEach(f => {
-    const row = el("div", "file"); const a = el("a", null, f.path); a.href = fileUrl(f.path); a.target = "_blank"; a.rel = "noopener"; a.title = "Play in new tab";
-    row.append(a, el("span", null, fmtSize(f.size)), el("span", null, new Date(f.mtime * 1000).toLocaleString()));
-    box.append(row);
-  });
-}
-
-let rev = -1, restarting = false, lastPw = null;
-async function poll() {
-  if (restarting) return;
-  try {
-    const s = await api("/api/state?rev=" + rev);
-    $("#ver").textContent = "yt-dlp " + s.version;
-    $("#openDir").title = s.root;
-    $("#notice").hidden = s.ffmpeg;
-    $("#offline").hidden = true;
-    if (lastPw !== s.playwright) {
-      lastPw = s.playwright;
-      $("#jsRender").disabled = !s.playwright;
-      $("#jsHint").textContent = s.playwright
-        ? "Playwright detected. On Windows, system built-in Edge will be prioritized, no need to download additional browser."
-        : "Playwright not detected. Run pip install playwright and restart to enable (No need to download browser if Edge is installed on Windows).";
-    }
-    renderJobs(s.jobs);
-    trackCompletion(s.jobs);
-    if (s.files) renderFiles(s.files);
-    rev = s.rev;
-  } catch (e) { $("#offline").hidden = false; }
-}
-
-$("#openDir").onclick = () => api("/api/open-folder", {}).catch(e => toast(e.message, true));
-$("#clearBtn").onclick = async () => { try { await api("/api/clear", {}); poll(); } catch (e) { toast(e.message, true); } };
-
-
-// ── Search & Filters ──
-const matches = j => {
-  const q = filterQ.trim().toLowerCase();
-  if (q && !((j.title || "").toLowerCase().includes(q) || j.url.toLowerCase().includes(q))) return false;
-  if (filterS === "active") return j.status === "queued" || j.status === "running";
-  if (filterS === "done") return j.status === "done";
-  if (filterS === "bad") return j.status === "error" || j.status === "canceled";
-  return true;
-};
-function applyFilter() {
-  let shown = 0, first = null;
-  for (const n of $("#jobs").children) {
-    const ok = !n._job || matches(n._job);
-    n.hidden = !ok; n.classList.remove("first");
-    if (ok) { shown++; if (!first) first = n; }
-  }
-  if (first) first.classList.add("first");
-  const total = nodes.size;
-  $("#jobsEmpty").hidden = total > 0;
-  $("#jobsNoMatch").hidden = !(total > 0 && shown === 0);
-  $("#count").textContent = !total ? "" : shown === total ? total + " tasks" : "Showing " + shown + " / " + total;
-  renderFileRows();
-}
-$("#q").addEventListener("input", e => { filterQ = e.target.value; applyFilter(); });
-$("#flt").addEventListener("change", e => { filterS = e.target.value; applyFilter(); });
-$("#refreshFiles").onclick = () => { rev = -1; poll(); };
-
-// ── Paste & Drag-Drop ──
-const extractUrls = text => [...new Set((String(text).match(/https?:\/\/[^\s"'<>\\)\]，。）】]+/gi) || []).map(u => u.replace(/[.,;、]+$/, "")))];
-function addUrls(list, source) {
-  if (!list.length) { toast("No links found", true); return 0; }
-  const have = new Set(readUrls()), fresh = list.filter(u => !have.has(u));
-  if (!fresh.length) { toast("These links are already in the input box"); return 0; }
-  const ta = $("#urls");
-  ta.value = (ta.value.trim() ? ta.value.replace(/\s*$/, "\n") : "") + fresh.join("\n") + "\n";
-  ta.classList.remove("flash"); void ta.offsetWidth; ta.classList.add("flash");
-  toast("Added " + fresh.length + " link(s)" + (source ? " (" + source + ")" : ""));
-  return fresh.length;
-}
-document.addEventListener("paste", e => {
-  const t = e.target;
-  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
-  const urls = extractUrls((e.clipboardData && e.clipboardData.getData("text")) || "");
-  if (urls.length) { e.preventDefault(); addUrls(urls, "from clipboard"); }
-});
-$("#pasteBtn").onclick = async () => {
-  try { addUrls(extractUrls(await navigator.clipboard.readText()), "from clipboard"); }
-  catch (e) { toast("Browser clipboard access denied, please press Ctrl+V directly", true); }
-};
-let dragDepth = 0;
-const hasPayload = e => e.dataTransfer && [...e.dataTransfer.types].some(t => t === "Files" || t === "text/uri-list" || t === "text/plain");
-window.addEventListener("dragenter", e => { if (!hasPayload(e)) return; e.preventDefault(); dragDepth++; $("#drop").hidden = false; });
-window.addEventListener("dragover", e => { if (hasPayload(e)) e.preventDefault(); });
-window.addEventListener("dragleave", e => { if (!hasPayload(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $("#drop").hidden = true; });
-window.addEventListener("drop", async e => {
-  if (!hasPayload(e)) return;
-  e.preventDefault(); dragDepth = 0; $("#drop").hidden = true;
-  const dt = e.dataTransfer, urls = [];
-  for (const f of [...dt.files].slice(0, 20)) {
-    if (!(f.type.startsWith("text/") || /\.(txt|csv|md|list|url|webloc|json|html?)$/i.test(f.name))) { toast(f.name + " is not a text file, skipped", true); continue; }
-    if (f.size > 2e6) { toast(f.name + " is too large, skipped", true); continue; }
-    try { urls.push(...extractUrls(await f.text())); } catch (_) {}
-  }
-  if (!dt.files.length) urls.push(...extractUrls(dt.getData("text/uri-list") + "\n" + dt.getData("text/plain")));
-  if (dt.files.length || urls.length) addUrls([...new Set(urls)], dt.files.length ? "from dropped files" : "from dropped links");
-});
-
-// ── Notifications ──
-const lastStatus = new Map();
-let wasActive = false, batch = {ok: 0, bad: 0, title: ""}, doneMark = false;
-const notifyState = () => ("Notification" in window) ? Notification.permission : "unsupported";
-function refreshNotifyBtn() {
-  const b = $("#notifyBtn"), st = notifyState();
-  if (st === "unsupported") { b.hidden = true; return; }
-  b.textContent = st === "granted" ? "Notifications: Enabled" : st === "denied" ? "Notifications Blocked by Browser" : "Enable Completion Notifications";
-  b.disabled = st === "denied";
-}
-$("#notifyBtn").onclick = async () => {
-  if (notifyState() === "granted") return toast("Already enabled: you'll be notified when queue finishes and page is not in foreground");
-  try { await Notification.requestPermission(); } catch (e) {}
-  refreshNotifyBtn();
-  if (notifyState() === "granted") { try { new Notification("Video Grabber WebUI", {body: "Notifications Enabled"}); } catch (e) {} }
-};
-function announceDone(b) {
-  const msg = b.bad ? "Completed " + b.ok + ", failed " + b.bad : b.ok === 1 ? "Download complete: " + b.title : b.ok + " downloads completed";
-  const away = document.hidden || !document.hasFocus();
-  if (away) doneMark = true;
-  toast(msg, !!b.bad && !b.ok);
-  if (away && notifyState() === "granted") {
-    try { const n = new Notification("Video Grabber WebUI", {body: msg, tag: "grab-done"}); n.onclick = () => { window.focus(); n.close(); }; } catch (e) {}
-  }
-}
-function trackCompletion(jobs) {
-  let active = 0;
-  for (const j of jobs) {
-    const prev = lastStatus.get(j.id), was = prev === "queued" || prev === "running";
-    if (was && j.status === "done") { batch.ok++; batch.title = j.title || j.url; }
-    if (was && j.status === "error") batch.bad++;
-    lastStatus.set(j.id, j.status);
-    if (j.status === "queued" || j.status === "running") active++;
-  }
-  if (wasActive && !active && batch.ok + batch.bad > 0) { announceDone(batch); batch = {ok: 0, bad: 0, title: ""}; }
-  wasActive = active > 0;
-  document.title = active ? "Downloading (" + active + ") - Video Grabber WebUI" : doneMark ? "Done - Video Grabber WebUI" : "Video Grabber WebUI";
-}
-window.addEventListener("focus", () => { doneMark = false; });
-
-// ── Update yt-dlp ──
-function showUpd(text, o) {
-  o = o || {};
-  $("#upd").hidden = false; $("#updMsg").textContent = text;
-  $("#updDo").hidden = !o.canUpdate; $("#updRestart").hidden = !o.canRestart;
-}
-async function checkUpdate(force, silent) {
-  try {
-    const r = await api("/api/ytdlp/check" + (force ? "?force=1" : ""));
-    const b = $("#updBtn");
-    b.classList.toggle("attn", !!(r.newer || r.needs_restart));
-    b.textContent = r.needs_restart ? "Restart to complete update" : r.newer ? "Update yt-dlp (new version available)" : "Check for Updates";
-    if (r.needs_restart) { if (!silent) showUpd("yt-dlp updated to " + r.installed + ", restart service to apply. A new terminal window may pop up, you can close the old one.", {canRestart: true}); }
-    else if (r.error) { if (!silent) showUpd(r.error); }
-    else if (r.newer) { if (!silent) showUpd("New version " + r.latest + " available (current " + r.installed + "). Updating often fixes download issues due to site changes.", {canUpdate: true}); }
-    else if (!silent) showUpd("Already on the latest version (" + r.installed + ").");
-    return r;
-  } catch (e) { if (!silent) toast(e.message, true); }
-}
-$("#updBtn").onclick = () => checkUpdate(true, false);
-$("#updClose").onclick = () => { $("#upd").hidden = true; };
-let updTimer = null;
-async function pollUpdate() {
-  clearTimeout(updTimer);
-  let s;
-  try { s = await api("/api/ytdlp/update-status"); } catch (e) { return; }
-  const log = $("#updLog"); log.hidden = false; log.textContent = s.lines.join("\n"); log.scrollTop = log.scrollHeight;
-  if (s.status === "running") { updTimer = setTimeout(pollUpdate, 800); return; }
-  $("#updDo").disabled = false;
-  if (s.status === "error") { showUpd(s.error || "Update failed"); return; }
-  if (s.extras && s.extras.includes("deno")) {
-    showUpd("Components installed. Restart the service so yt-dlp picks them up.", {canRestart: true});
-    loadDoctor(false, true);
-    return;
-  }
-  await checkUpdate(true, false);
-  loadDoctor(false, true);
-}
-async function runUpdate(extras) {
-  try { await api("/api/ytdlp/update", extras ? {extras} : {}); } catch (e) { return toast(e.message, true); }
-  $("#upd").hidden = false; $("#updDo").hidden = true; $("#updRestart").hidden = true; $("#updDo").disabled = true;
-  $("#updMsg").textContent = extras ? "Installing components…" : "Updating yt-dlp…";
-  $("#updLog").textContent = ""; $("#updLog").hidden = false;
-  pollUpdate();
-}
-$("#updDo").onclick = () => runUpdate();
-$("#updRestart").onclick = async () => {
-  try { await api("/api/restart", {}); } catch (e) { return toast(e.message, true); }
-  restarting = true; $("#offline").hidden = true; toast("Restarting, please wait a few seconds...");
-  setTimeout(() => {
-    const t = setInterval(async () => {
-      try { const r = await fetch("/", {cache: "no-store"}); if (r.ok) { clearInterval(t); location.reload(); } } catch (e) {}
-    }, 1000);
-  }, 1500);
-};
-
-
-// ── Cookies (uploaded cookies.txt) ──
-let wantFileCookies = false;
-function applyCookieStatus(st, select) {
-  $("#cookieSrc option[value=file]").disabled = !st.present;
-  $("#cookieDel").hidden = !st.present;
-  const box = $("#cookieStatus");
-  if (!st.present) {
-    box.textContent = "No cookies.txt uploaded.";
-    if ($("#cookieSrc").value === "file") { $("#cookieSrc").value = ""; saveOptions(); }
-    return;
-  }
-  const bits = [st.cookies + (st.cookies === 1 ? " cookie" : " cookies") + " for " + st.domain_count + (st.domain_count === 1 ? " site" : " sites")];
-  if (st.expired) bits.push(st.expired + " already expired");
-  if (st.has_youtube) bits.push(st.youtube_login ? "YouTube sign-in found" : "no YouTube sign-in cookies");
-  if (st.has_bilibili) bits.push(st.bilibili_login ? "Bilibili sign-in found" : "no Bilibili sign-in cookie");
-  box.textContent = bits.join("; ") + ".";
-  if (select || wantFileCookies) { $("#cookieSrc").value = "file"; wantFileCookies = false; saveOptions(); }
-}
-async function loadCookies() { try { applyCookieStatus(await api("/api/cookies")); } catch (e) {} }
-$("#cookieUp").onclick = () => $("#cookieFile").click();
-$("#cookieFile").addEventListener("change", async e => {
-  const f = e.target.files[0]; e.target.value = "";
-  if (!f) return;
-  if (f.size > 3e6) return toast("That file is larger than 3 MB, so it is probably not a cookies.txt.", true);
-  try { applyCookieStatus(await api("/api/cookies", {text: await f.text()}), true); toast("cookies.txt uploaded"); }
-  catch (err) { toast(err.message, true); }
-});
-$("#cookieDel").onclick = async () => {
-  try { applyCookieStatus(await api("/api/cookies/delete", {})); toast("cookies.txt removed"); } catch (e) { toast(e.message, true); }
-};
-
-// ── Diagnostics ──
-let lastDoctor = null;
-const STATUS_TEXT = {ok: "OK", info: "Info", warn: "Warning", error: "Problem"};
-async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
-  const ta = el("textarea"); ta.value = text; ta.style.cssText = "position:fixed;opacity:0";
-  document.body.append(ta); ta.select();
-  let ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
-  ta.remove(); return ok;
-}
-function renderDoctor(d) {
-  const list = $("#docList"); list.replaceChildren();
-  d.checks.forEach(c => {
-    const row = el("div", "doc-row"), main = el("div");
-    main.append(el("div", "lbl", c.label), el("div", "det", c.detail));
-    if (c.fix || c.action) {
-      const fix = el("div", "doc-fix");
-      if (c.fix) {
-        fix.append(el("code", null, c.fix));
-        const cp = el("button", "btn small", "Copy"); cp.type = "button";
-        cp.onclick = async () => toast((await copyText(c.fix)) ? "Copied" : "Could not copy", false);
-        fix.append(cp);
-      }
-      if (c.action) {
-        const go = el("button", "btn small primary", "Install now"); go.type = "button";
-        go.onclick = () => runUpdate(c.action === "install_components" ? "default,deno" : "default");
-        fix.append(go);
-      }
-      main.append(fix);
-    }
-    row.append(el("span", "badge " + c.status, STATUS_TEXT[c.status] || c.status), main);
-    list.append(row);
-  });
-}
-async function loadDoctor(net, silent) {
-  if (!silent) { $("#doctor").hidden = false; $("#docList").replaceChildren(el("p", "muted", net ? "Testing the network…" : "Checking…")); }
-  try {
-    const d = await api("/api/doctor?" + (net ? "net=1" : silent ? "" : "force=1"));
-    lastDoctor = d;
-    if (!$("#doctor").hidden) renderDoctor(d);
-    updateEnvNotice(d);
-    return d;
-  } catch (e) { if (!silent) $("#docList").replaceChildren(el("p", "err", e.message)); }
-}
-function updateEnvNotice(d) {
-  const bad = d.checks.filter(c => (c.id === "js_runtime" || c.id === "ejs") && (c.status === "warn" || c.status === "error"));
-  const sig = bad.map(c => c.id).join(",");
-  let dismissed = ""; try { dismissed = localStorage.getItem("grab-env-dismissed") || ""; } catch (e) {}
-  if (!bad.length || dismissed === sig) { $("#envNotice").hidden = true; return; }
-  $("#envMsg").textContent = "YouTube setup incomplete: " + bad.map(c => c.label).join(" and ") + " not detected. Some YouTube formats may be unavailable.";
-  $("#envNotice").dataset.sig = sig; $("#envNotice").hidden = false;
-}
-$("#docBtn").onclick = () => loadDoctor(false, false);
-$("#docRecheck").onclick = () => loadDoctor(false, false);
-$("#docNet").onclick = () => loadDoctor(true, false);
-$("#docCopy").onclick = async () => {
-  if (!lastDoctor) return toast("Run a check first", true);
-  toast((await copyText(lastDoctor.report)) ? "Report copied. Read it before you share it." : "Could not copy", false);
-};
-$("#docClose").onclick = () => { $("#doctor").hidden = true; };
-$("#envOpen").onclick = () => loadDoctor(false, false);
-$("#envDismiss").onclick = () => {
-  try { localStorage.setItem("grab-env-dismissed", $("#envNotice").dataset.sig || ""); } catch (e) {}
-  $("#envNotice").hidden = true;
-};
-
-restoreOptions(); syncForm(); refreshNotifyBtn(); poll(); checkUpdate(false, true); loadCookies(); loadDoctor(false, true);
-setInterval(() => { if (!document.hidden) poll(); }, 1000);
-</script>
-</body>
-</html>
-"""
+from webui_legacy_html import INDEX_HTML  # noqa: E402
 
 
 # ───────────────────────── Entry Point ─────────────────────────
 def open_native_window(url: str) -> bool:
     """Try to open url in its own pywebview window. Returns False if pywebview is not installed
     or WebView2 cannot start (the caller then falls back to a browser tab). Blocks until the
-    window is closed."""
-    global NATIVE_WINDOW
+    desktop session exits. On Windows, closing the main window asks or follows the saved tray preference."""
+    global NATIVE_WINDOW, NATIVE_DESKTOP
+    desktop = None
     try:
         import webview
     except ImportError:
@@ -2869,21 +2501,43 @@ def open_native_window(url: str) -> bool:
         # External documentation links use target=_blank and must leave the trusted local app
         # surface instead of navigating this window away from its token-protected origin.
         webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        # Backup exports use a Blob download and need WebView2's native save dialog.
+        webview.settings["ALLOW_DOWNLOADS"] = True
         storage_path = CONFIG_DIR / "webview"
         storage_path.mkdir(parents=True, exist_ok=True)
         NATIVE_WINDOW = webview.create_window(
             "Video Grabber", url, width=1180, height=860, min_size=(680, 520),
             background_color="#0b0d10", text_select=True,
         )
+        if sys.platform == "win32":
+            from grab_desktop import DesktopBridge, DesktopController
+            desktop = DesktopController(webview, NATIVE_WINDOW, url, preferences_path=CONFIG_DIR / "desktop.json",
+                                        pending_downloads=active_jobs,
+                                        notification_jobs=lambda since: [job.view(ROOT) for job in JOB_MANAGER.snapshot()
+                                            if job.finished > since or job.status in {"queued", "running"}
+                                            or (job.status in {"done", "error"} and not job.finished)],
+                                        notification_action=open_completed_download)
+            NATIVE_DESKTOP = desktop
+            bridge = DesktopBridge(desktop)
+            NATIVE_WINDOW.expose(bridge.sync_locale, bridge.close_settings, bridge.set_close_behavior,
+                                 bridge.close_action)
+            NATIVE_WINDOW.events.closing += desktop.close_main
         start_options = {"private_mode": False, "storage_path": str(storage_path)}
         if sys.platform == "win32":
             start_options["gui"] = "edgechromium"
-        webview.start(**start_options)
+        if desktop:
+            webview.start(desktop.start, **start_options)
+        else:
+            webview.start(**start_options)
     except Exception as exc:  # noqa: BLE001 - GUI/runtime failures must retain the browser fallback
         print(f"Could not start the native app window: {exc}")
         if sys.platform == "win32":
             print("Install or repair Microsoft Edge WebView2 Runtime, or start with --ui browser.")
         return False
+    finally:
+        if desktop:
+            desktop.stop()
+        NATIVE_DESKTOP = None
     return True
 
 
@@ -2947,7 +2601,8 @@ def main(argv=None) -> None:
         thread.start()
     try:
         if ui_mode == "window":
-            print("Close the window to stop.")
+            print("Closing the window asks to run in the tray or exit; change this in Close behavior."
+                  if sys.platform == "win32" else "Close the window to stop.")
             if not open_native_window(url):
                 print("Hint: pywebview is not installed, opening your browser instead. Run: pip install pywebview")
                 WINDOW_MODE = False
@@ -2963,6 +2618,7 @@ def main(argv=None) -> None:
         print("\nStopped.")
     finally:
         QUEUE.stop()
+        ORGANIZER.stop()
         STOP_EVENT.set()
         with QUEUE.mutex:
             for job in JOB_MANAGER.snapshot():

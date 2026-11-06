@@ -245,6 +245,9 @@ def ensure_runtime(with_playwright: bool = False, update: bool = False) -> None:
         _install_component(name, manifest["components"][name], update)
     _ensure_python_package(("yt_dlp", "curl_cffi", "yt_dlp_ejs"), manifest["python_packages"]["yt_dlp"], update)
     _ensure_python_package(("webview",), manifest["python_packages"]["desktop"], update)
+    _ensure_python_package(("pystray",), manifest["python_packages"]["tray"], update)
+    _ensure_python_package(("PIL",), manifest["python_packages"]["tray_images"], update)
+    _ensure_python_package(("windows_toasts",), manifest["python_packages"]["notifications"], update)
     if with_playwright:
         _ensure_python_package(("playwright",), manifest["python_packages"]["playwright"], update)
     configure_portable()

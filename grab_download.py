@@ -6,11 +6,27 @@ import contextlib
 import copy
 import re
 
-from yt_dlp.utils import DownloadCancelled, DownloadError
+from yt_dlp.postprocessor.embedthumbnail import EmbedThumbnailPP
+from yt_dlp.utils import DownloadCancelled, DownloadError, PostProcessingError
 
 from grab_models import http_url
 
 RETRY_DELAYS = (2, 5)
+
+
+def optional_video_cover_downloader(base):
+    """Keep a usable video and its sidecar when a container rejects embedded artwork."""
+    class CoverDownloader(base):
+        def run_pp(self, pp, infodict):
+            try:
+                return super().run_pp(pp, infodict)
+            except PostProcessingError as error:
+                if not isinstance(pp, EmbedThumbnailPP):
+                    raise
+                self.report_warning(f"Could not embed the cover; the separate cover is kept for Library: {error}")
+                return infodict
+
+    return CoverDownloader
 
 
 def transient_network_error(message: str) -> bool:

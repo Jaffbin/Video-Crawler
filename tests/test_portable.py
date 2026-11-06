@@ -26,6 +26,21 @@ def test_manifest_pins_official_python_and_required_ytdlp_extras():
     package = manifest["python_packages"]["yt_dlp"]
     assert "curl-cffi" in package and "default" in package
     assert manifest["python_packages"]["desktop"].startswith("pywebview")
+    assert manifest["python_packages"]["tray"].startswith("pystray")
+    assert manifest["python_packages"]["tray_images"].startswith("Pillow")
+    assert manifest["python_packages"]["notifications"].startswith("windows-toasts")
+
+
+def test_portable_runtime_prepares_tray_dependencies(monkeypatch):
+    calls = []
+    monkeypatch.setattr(portable_bootstrap.os, "name", "nt")
+    monkeypatch.setattr(portable_bootstrap, "_install_component", lambda *args: None)
+    monkeypatch.setattr(portable_bootstrap, "_ensure_python_package", lambda names, package, update: calls.append((names, package)))
+    monkeypatch.setattr(portable_bootstrap, "configure_portable", lambda: None)
+    portable_bootstrap.ensure_runtime()
+    assert any(names == ("pystray",) for names, _ in calls)
+    assert any(names == ("windows_toasts",) for names, _ in calls)
+    assert any(names == ("PIL",) for names, _ in calls)
 
 
 def test_github_asset_requires_exact_name_https_and_digest(monkeypatch):
