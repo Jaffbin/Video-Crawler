@@ -27,6 +27,7 @@ import http.cookies
 import importlib.metadata
 import importlib.util
 import json
+import logging
 import mimetypes
 import os
 import queue
@@ -55,6 +56,7 @@ from grab_organizer import LibraryOrganizer  # noqa: E402
 from grab_backup import BACKUP_MAX_BYTES, BackupService  # noqa: E402,F401  (BackupService is used by the library routes)
 from grab_repair import repair, repair_options  # noqa: E402
 from grab_archive import seed_archive  # noqa: E402
+from grab_hooks import HookRunner, ensure_config_file, load_config  # noqa: E402
 from grab_errors import error_details, fmt_eta, fmt_speed, friendly_error, strip_ansi  # noqa: E402
 import grab_cookies  # noqa: E402
 import webui_routes_library  # noqa: E402
@@ -547,7 +549,16 @@ def worker(stop_event: threading.Event | None = None) -> None:
                 job.finished = time.time()
             bump_rev()
             save_history()
+            dispatch_download_hooks(job)
             QUEUE.task_done()
+
+
+def dispatch_download_hooks(job: Job) -> None:
+    # A user's hook settings must never stop the download worker.
+    try:
+        HOOKS.dispatch(job, ROOT)
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception("Could not queue the download hook for job %s", job.id)
 
 
 def create_jobs(urls: list[str], options: dict, source: str = "") -> list[str]:
@@ -1239,6 +1250,29 @@ def set_extension_access(enabled: bool) -> None:
     store.save({**(data if isinstance(data, dict) else {}), "extension": enabled})
 
 
+# ───────────────────────── Download hooks ─────────────────────────
+HOOKS = HookRunner(lambda: CONFIG_DIR / "hooks.json")
+
+
+def hooks_status() -> dict:
+    path = HOOKS.config_path()
+    config = load_config(path)
+    return {"path": str(path), "exists": config["exists"], "enabled": config["enabled"],
+            "error": config["error"], "hooks": config["hooks"], **HOOKS.status()}
+
+
+def open_hooks_config() -> dict:
+    """Create a disabled template if needed, then show the file. Only a person editing it enables hooks."""
+    path = HOOKS.config_path()
+    ensure_config_file(path)
+    try:
+        _open_with_os(path)
+    except (OSError, subprocess.SubprocessError):
+        # Some systems have no default program for .json files; showing the folder still helps.
+        open_in_file_manager(path.parent)
+    return hooks_status()
+
+
 # ───────────────────────── Diagnostics ─────────────────────────
 def collect_doctor(net: bool = False, force: bool = False) -> dict:
     if not net and not force and DOCTOR_CACHE["data"] and time.time() - DOCTOR_CACHE["ts"] < 15:
@@ -1857,6 +1891,7 @@ def main(argv=None) -> None:
         target=subscription_scheduler, name="subscription-scheduler", daemon=True,
     )
     server_thread = threading.Thread(target=srv.serve_forever, name="http-server", daemon=True)
+    HOOKS.start()
     for thread in [*worker_threads, scheduler_thread, server_thread]:
         thread.start()
     try:
@@ -1890,6 +1925,7 @@ def main(argv=None) -> None:
         srv.server_close()
         for thread in [*worker_threads, scheduler_thread, server_thread]:
             thread.join(timeout=2)
+        HOOKS.stop()
         save_history()
 
 

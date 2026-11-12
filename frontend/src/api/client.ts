@@ -16,6 +16,7 @@ import type {
   SmartRules,
   LibraryCheck,
   LibraryBatchResult,
+  HooksStatus,
 } from '../types/api'
 import { sanitizeOptions } from '../lib/options'
 import type { BrowserPreferences, BackupReview } from '../lib/backup'
@@ -202,6 +203,8 @@ export const getCookies = () => api<CookieStatus>('/api/cookies')
 export const getAccess = () => api<{ extension: boolean }>('/api/access')
 export const setExtensionAccess = (extension: boolean) =>
   api<{ extension: boolean }>('/api/access', { method: 'POST', body: JSON.stringify({ extension }) })
+export const getHooks = () => api<HooksStatus>('/api/hooks')
+export const openHooksConfig = () => post<HooksStatus>('/api/hooks/open-config')
 export const uploadCookies = (text: string) => post<CookieStatus>('/api/cookies', { text })
 export const deleteCookies = () => post<CookieStatus>('/api/cookies/delete')
 export const getDoctor = (net = false, force = true) =>

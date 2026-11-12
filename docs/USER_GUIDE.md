@@ -527,6 +527,55 @@ Successful merges/conversions move superseded inputs into Recovery. Cancellation
 failure keeps originals intact. Missing/ambiguous inputs or missing requested covers/subtitles
 require downloading the original item again. A completed output is never overwritten.
 
+## Run a program after downloads
+
+Video Grabber can run a program of your choice after each download finishes or fails, for
+example a script that moves, converts or uploads the file. It is off by default.
+
+Open **Settings and help → Run a program after downloads → Open settings file**. The first time,
+this creates `hooks.json` in the settings folder (`%APPDATA%\grab-webui` on Windows) with hooks
+turned off. Programs can only be set by editing this file. The app and the Chrome extension cannot
+change it, so nothing that talks to the app can make it run a program.
+
+```json
+{
+  "enabled": true,
+  "hooks": {
+    "download_completed": {"command": ["C:\\Scripts\\after-download.bat"], "timeout_seconds": 60},
+    "download_failed": {"command": ["python", "C:\\Scripts\\notify.py", "--failed"]}
+  }
+}
+```
+
+- `command` lists the program first, then its arguments. It runs directly, not through a shell,
+  so write the full path to a `.bat`, `.exe` or script interpreter.
+- `timeout_seconds` is optional (default 60, at most 600). A program that runs longer is stopped.
+- Keys starting with `_` are comments. Any other unknown key, or a file that is not valid JSON,
+  disables all hooks, and Settings shows the problem.
+- Changes apply to the next finished download; no restart is needed.
+
+The program receives the details on standard input as JSON:
+
+```json
+{
+  "version": 1,
+  "event": "download_completed",
+  "job": {"id": "8a8f8964", "url": "https://…", "title": "…", "status": "done", "mode": "mp4",
+          "subscription_id": "", "finished": 1794475860.7, "repair": false},
+  "files": [{"path": "D:\\Videos\\clip.mp4", "relative": "clip.mp4"}],
+  "library_root": "D:\\Videos"
+}
+```
+
+Failed downloads add `job.error` and `job.error_kind`. For simple scripts the same details are in
+environment variables: `VG_EVENT`, `VG_JOB_ID`, `VG_STATUS`, `VG_TITLE`, `VG_URL`, `VG_MODE`,
+`VG_FILE` (the main media file, not its cover or subtitles), `VG_FILE_COUNT`, `VG_LIBRARY_ROOT` and,
+for failures, `VG_ERROR`. Download options are never passed, because they can contain proxy
+passwords. Canceled downloads run nothing.
+
+Programs run one at a time in the background and never delay downloads. Settings shows the result
+of the last run; hover over it to see the end of the program's error output.
+
 ## Language and connectivity
 
 English, Simplified Chinese, Traditional Chinese and Japanese are available from **Language**.

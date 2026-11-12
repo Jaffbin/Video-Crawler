@@ -286,3 +286,26 @@ export interface SubscriptionPreview {
     eligible: boolean
   }>
 }
+
+export type HookEvent = 'download_completed' | 'download_failed'
+
+export interface HookRun {
+  event: HookEvent
+  job_id: string
+  outcome: 'ok' | 'failed' | 'timeout' | 'not_started' | 'skipped'
+  exit_code: number | null
+  duration: number
+  detail: string
+  finished: number
+}
+
+/** Read-only: hook commands can only be changed by editing the settings file. */
+export interface HooksStatus {
+  path: string
+  exists: boolean
+  enabled: boolean
+  error: string | null
+  hooks: Partial<Record<HookEvent, { command: string[]; timeout_seconds: number }>>
+  pending: number
+  recent: HookRun[]
+}

@@ -21,6 +21,12 @@ def system_get(app, h, path: str, q: dict) -> bool:
     if path == "/api/access":
         h._json({"extension": app.extension_access_enabled()})
         return True
+    if path == "/api/hooks":
+        if not h._session_cookie_ok():
+            h._json({"error": "Open Video Grabber to see download hooks."}, 403)
+            return True
+        h._json(app.hooks_status())
+        return True
     if path == "/api/setup":
         h._json(app.setup_status())
         return True
@@ -160,6 +166,17 @@ def system_post(app, h, path: str, body: dict) -> bool:
             h._json({"error": "Could not save this setting."}, 500)
             return True
         h._json({"extension": enabled})
+        return True
+
+    if path == "/api/hooks/open-config":
+        # Clients holding only the API token (such as the extension) must not reach hook settings.
+        if not h._session_cookie_ok():
+            h._json({"error": "Open Video Grabber to change download hooks."}, 403)
+            return True
+        try:
+            h._json(app.open_hooks_config())
+        except OSError as error:
+            h._json({"error": f"Could not create the settings file: {error}"}, 500)
         return True
 
     if path == "/api/cookies/delete":

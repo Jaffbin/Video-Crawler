@@ -43,7 +43,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Could not bundle pip into embedded Python." }
 
     $Files = @(
-        "grab.py", "grab_archive.py", "grab_backup.py", "grab_config.py", "grab_cookies.py", "grab_download.py", "grab_errors.py", "grab_images.py", "grab_library.py", "grab_organizer.py", "grab_repair.py", "grab_desktop.py", "grab_notifications.py", "grab_models.py", "grab_sites.py", "grab_state.py", "grab_storage.py", "grab_subscriptions.py",
+        "grab.py", "grab_archive.py", "grab_backup.py", "grab_config.py", "grab_cookies.py", "grab_download.py", "grab_errors.py", "grab_hooks.py", "grab_images.py", "grab_library.py", "grab_organizer.py", "grab_repair.py", "grab_desktop.py", "grab_notifications.py", "grab_models.py", "grab_sites.py", "grab_state.py", "grab_storage.py", "grab_subscriptions.py",
         "webui.py", "webui_legacy_html.py", "webui_routes_jobs.py", "webui_routes_library.py", "webui_routes_subscriptions.py", "webui_routes_system.py", "portable_bootstrap.py", "portable_launcher.py", "portable_manifest.json", "README.md",
         "THIRD_PARTY_NOTICES.md"
     )

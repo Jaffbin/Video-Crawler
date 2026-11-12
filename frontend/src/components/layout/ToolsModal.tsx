@@ -2,6 +2,7 @@ import { FolderOpen, RefreshCw, Stethoscope } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
+import { DownloadHooks } from './DownloadHooks'
 import { ExtensionAccess } from './ExtensionAccess'
 
 interface Props {
@@ -46,6 +47,7 @@ export function ToolsModal(p: Props) {
           )}
         </Button>
         <ExtensionAccess />
+        <DownloadHooks />
       </div>
     </Modal>
   )
