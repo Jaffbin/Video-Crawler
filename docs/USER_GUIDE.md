@@ -88,6 +88,7 @@ intentionally removed. Theme/language and presets update without restarting the 
 The optional Chrome extension provides the same single-item workflow from a video or music page.
 Install the development version using [the Chrome extension instructions](../browser-extension/README.md).
 Click its toolbar icon, choose the output and quality, confirm the save folder and add to the queue.
+First turn on **Allow the Chrome extension to connect** in **Settings and help**; it is off by default.
 Keep the app running (the Windows tray is enough). If disconnected, open the app and click Reconnect.
 Press **Alt+Shift+V** to open the extension for the current page, or right-click a web page/link and
 choose **Send this page/link to Video Grabber…**. Confirm the displayed link, format and quality
@@ -218,6 +219,14 @@ existing videos, audio and companion files are retained. Saved quality/bitrate i
 known, and differing settings are called out. Older files without quality records are labeled
 as unknown. Files that are missing, empty, in Recovery or incomplete do not prevent a new download.
 This check does not claim that an entire playlist or multi-stream page has been downloaded.
+
+**Skip videos that were already downloaded** (New download) covers playlists and Auto-download
+too. Before each task, complete files in Library whose source link maps to a known site video are
+added to the skip list, so videos saved before the option was turned on are skipped as well.
+Video and audio keep separate lists (`.archive.txt` and `.archive-audio.txt` in the download
+folder): having a video as MP3 does not stop an MP4 download. A file you deleted or moved to
+Recovery is downloaded again. Direct media links and sites without a matching extractor are not
+recognized and are downloaded again.
 
 MP4, MP3 and source audio tasks verify that ffmpeg can start before downloading media. A missing or blocked
 executable fails the task immediately; expand its log and open Diagnostics to see the selected

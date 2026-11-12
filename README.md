@@ -128,7 +128,8 @@ through its toolbar, **Alt+Shift+V**, or an explicit page/link right-click actio
 the same output/quality confirmation; links are not downloaded automatically. It sends the choice
 to this same queue. Choose video, MP3 or source audio and confirm the save folder without copying
 the link. The initial version loads from `browser-extension/chrome` using Chrome's **Load unpacked**;
-it has not been published to the Chrome Web Store. Keep the local app running.
+it has not been published to the Chrome Web Store. Keep the local app running and switch on
+**Allow the Chrome extension to connect** in **Settings and help** (off by default).
 
 Run `python webui.py --help` for all options (download folder, port, worker count,
 `--sub-interval` for how often subscriptions are re-checked).
