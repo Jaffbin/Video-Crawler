@@ -1,19 +1,35 @@
 # Video Grabber
 
-A private, local-first video, audio and image downloader powered by yt-dlp, with a desktop-style UI.
+Save videos, audio and images from the web to your own computer. Private, no account, and kept
+organized in a Library you control. Windows app and Python tool, powered by yt-dlp and ffmpeg.
 
-Paste a link, choose MP4, MP3, Keep source audio, Video cover or Direct image, and keep the result on your own computer. Video Grabber does not
-require an account or a hosted service, and it does not send your links or cookies to a
-project-owned cloud service. It connects directly to the sites you ask it to download from and to
-PyPI when checking for yt-dlp updates.
+**[Download for Windows](https://github.com/Jaffbin/Video-Crawler/releases/latest)** ·
+[User guide](docs/USER_GUIDE.md) · [Quick start from source](#quick-start) ·
+[Report a problem](https://github.com/Jaffbin/Video-Crawler/issues/new/choose)
 
 ![New download interface](docs/images/new-download.jpg)
+
+## Why Video Grabber
+
+- **Private by default.** Everything runs on your computer. There is no account and no hosted
+  service, and your links and cookies never go to a project server. It connects only to the sites
+  you download from and to PyPI when checking for a newer yt-dlp.
+- **Paste a link, get a file.** MP4, MP3, source audio, covers or images, from single videos,
+  playlists and channels. The queue survives restarts and retries only what failed.
+- **A Library, not a folder of files.** Search, favorites, collections, tags, duplicate checks, and
+  every delete can be undone.
+- **Built to keep working.** Sites change often, so the app checks for a newer yt-dlp, tells you
+  what is missing and sets it up for you.
 
 Start with **New download**, optionally analyze the link, then follow progress in **Queue**.
 Completed files appear in **Library**. See the [user guide](docs/USER_GUIDE.md) for previews,
 batch controls, and reversible file management.
 
-## Highlights
+Only download content you have the right to download. The application does not bypass DRM or
+access controls.
+
+<details>
+<summary>Everything it can do</summary>
 
 - Download individual videos, playlists and channels supported by yt-dlp.
 - Choose MP4 quality limits or MP3 bitrate.
@@ -51,8 +67,7 @@ batch controls, and reversible file management.
 - Diagnose ffmpeg, yt-dlp, Deno, Playwright, cookies and network problems from the UI.
 - Run in a native pywebview window, a normal browser tab, or directly from the CLI.
 
-Only download content you have the right to download. The application does not bypass DRM or
-access controls.
+</details>
 
 ## Quick start
 
