@@ -18,6 +18,7 @@ import type {
   LibraryBatchResult,
   HooksStatus,
   NotificationTestResponse,
+  AutoRule,
 } from '../types/api'
 import { sanitizeOptions } from '../lib/options'
 import type { BrowserPreferences, BackupReview } from '../lib/backup'
@@ -126,6 +127,12 @@ export const changeSmartCollection = (
   id?: string,
   rules?: SmartRules,
 ) => post<{ id: string }>('/api/library/smart-collections', { action, name, id, rules })
+export const getAutoRules = () => api<{ auto_rules: AutoRule[] }>('/api/library/auto-rules')
+export const changeAutoRule = (
+  action: 'create' | 'update' | 'delete',
+  id?: string,
+  rule?: Omit<AutoRule, 'id'>,
+) => post<{ id: string; auto_rules: AutoRule[] }>('/api/library/auto-rules', { action, id, rule })
 export const getLibraryCheck = () => api<LibraryCheck>('/api/library/organizer')
 export const libraryCheckAction = (action: 'start' | 'cancel') =>
   post<LibraryCheck>('/api/library/organizer', { action })

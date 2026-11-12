@@ -94,6 +94,15 @@ export interface SmartCollection extends LibraryCollection {
   builtin?: boolean
 }
 
+/** Applied by the backend when a download is saved; changes classification only, never files. */
+export interface AutoRule {
+  id: string
+  name: string
+  enabled: boolean
+  conditions: { source?: string; kind?: 'video' | 'audio' | 'image'; format?: string }
+  actions: { tags?: string[]; collections?: string[]; favorite?: boolean }
+}
+
 export interface RecoveryFile {
   id: string
   path: string

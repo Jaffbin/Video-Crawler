@@ -3,6 +3,7 @@ import { changeCollection } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
 import { useI18n } from '../../i18n'
 import type { FileItem, LibraryCollection, SmartCollection } from '../../types/api'
+import { AutoRules } from './AutoRules'
 import { SmartCollections } from './SmartCollections'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
@@ -24,7 +25,7 @@ export function CollectionManager({
 }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<'manual' | 'smart'>('manual')
+  const [tab, setTab] = useState<'manual' | 'smart' | 'auto'>('manual')
   const [name, setName] = useState('')
   const [editing, setEditing] = useState<string | undefined>()
   const [deleting, setDeleting] = useState<LibraryCollection | null>(null)
@@ -87,8 +88,18 @@ export function CollectionManager({
           >
             {t('Smart collections')}
           </Button>
+          <Button
+            variant={tab === 'auto' ? 'primary' : 'ghost'}
+            aria-pressed={tab === 'auto'}
+            disabled={busy}
+            onClick={() => setTab('auto')}
+          >
+            {t('Auto rules')}
+          </Button>
         </div>
-        {tab === 'smart' ? (
+        {tab === 'auto' ? (
+          <AutoRules files={files} collections={collections} onToast={onToast} onBusyChange={setBusy} />
+        ) : tab === 'smart' ? (
           <SmartCollections
             files={files}
             collections={smartCollections}

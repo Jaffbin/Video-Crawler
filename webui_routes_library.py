@@ -16,6 +16,9 @@ def library_get(app, h, path: str) -> bool:
     if path == "/api/library/trash":
         h._json({"items": app.LIBRARY.trash_items()})
         return True
+    if path == "/api/library/auto-rules":
+        h._json({"auto_rules": app.LIBRARY.auto_rules()})
+        return True
     return False
 
 
@@ -60,10 +63,14 @@ def library_post(app, h, path: str, body: dict) -> bool:
             h._json({"error": "Could not save file details. Refresh Library and check folder permissions."}, 409)
             return True
 
-    if path in ("/api/library/organize", "/api/library/collections", "/api/library/smart-collections"):
+    if path in ("/api/library/organize", "/api/library/collections", "/api/library/smart-collections",
+                "/api/library/auto-rules"):
         try:
             with app.QUEUE.mutex:
-                if path.endswith("/organize"):
+                if path.endswith("/auto-rules"):
+                    rule_id = app.LIBRARY.change_auto_rule(body.get("action"), body.get("id"), body.get("rule"))
+                    result = {"id": rule_id, "auto_rules": app.LIBRARY.auto_rules()}
+                elif path.endswith("/organize"):
                     result = app.LIBRARY.organize(body.get("items"), favorite=body.get("favorite"),
                                               collection_id=body.get("collection_id"), remove=body.get("remove", False))
                 elif path.endswith("/smart-collections"):

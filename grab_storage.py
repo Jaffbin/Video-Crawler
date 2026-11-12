@@ -154,12 +154,22 @@ class SqliteLibraryStore:
                     except ValueError:
                         pass
 
+                # Auto rules live in the key-value meta table, so no schema change is needed and
+                # older versions, which never delete meta rows, keep them intact.
+                cur.execute("SELECT value FROM meta WHERE key = 'auto_rules'")
+                row = cur.fetchone()
+                try:
+                    auto_rules = json.loads(row[0]) if row and row[0] else {}
+                except ValueError:
+                    auto_rules = {}
+
                 return {
                     "version": version,
                     "files": files,
                     "trash": trash,
                     "collections": collections,
                     "smart_collections": smart_collections,
+                    "auto_rules": auto_rules if isinstance(auto_rules, dict) else {},
                 }
         except (sqlite3.Error, OSError):
             return default
@@ -167,6 +177,9 @@ class SqliteLibraryStore:
     def _save_to_conn(self, conn: sqlite3.Connection, value: dict) -> None:
         version = value.get("version", 1)
         conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('version', ?)", (str(version),))
+        if isinstance(value.get("auto_rules"), dict):
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('auto_rules', ?)",
+                         (json.dumps(value["auto_rules"], ensure_ascii=False),))
 
         conn.execute("DELETE FROM files")
         files = value.get("files", {})

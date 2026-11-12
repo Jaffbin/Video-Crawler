@@ -298,6 +298,11 @@ def downloaded_matches(urls: list[str], options: dict) -> list[dict]:
 
 
 # ───────────────────────── Jobs ─────────────────────────
+def media_kind(suffix: str) -> str:
+    """Library kind of a lower-case file suffix; also what auto rules match on."""
+    return "image" if suffix in IMAGE_SUFFIXES else "audio" if suffix in grab.AUDIO_SUFFIXES else "video"
+
+
 def _library_file_is_complete(relative: str) -> bool:
     try:
         return LIBRARY.media_path(relative).stat().st_size > 0
@@ -511,7 +516,9 @@ def run_job(job: Job) -> None:
             continue
     if records:
         try:
-            LIBRARY.remember(records)
+            saved = LIBRARY.remember(records)
+            for relative, names in LIBRARY.apply_auto_rules(saved, lambda rel: media_kind(Path(rel).suffix.lower())):
+                log(f"[Library] Auto rules applied to {Path(relative).name}: {', '.join(names)}")
         except OSError as e:
             log(f"Warning: Could not save Library metadata: {e}")
     if ok:
@@ -793,7 +800,7 @@ def scan_files(*, force: bool = False) -> list[dict]:
             "thumbnail": LIBRARY.cover_path(path, metadata, media_paths=companion_paths) if suffix not in IMAGE_SUFFIXES else "",
             "collections": [key for key in record.get("collections", []) if isinstance(key, str)]
                            if isinstance(record.get("collections"), list) else [],
-            "kind": "image" if suffix in IMAGE_SUFFIXES else "audio" if suffix in grab.AUDIO_SUFFIXES else "video",
+            "kind": media_kind(suffix),
             "downloaded": record.get("downloaded") if isinstance(record.get("downloaded"), (int, float)) else st.st_mtime,
         })
     out.sort(key=lambda x: x["downloaded"], reverse=True)

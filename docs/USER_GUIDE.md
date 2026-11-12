@@ -402,6 +402,22 @@ media exists yet. Restore previews show their added count; an existing ID or nam
 current definition. Older backups remain supported. Earlier app versions do not restore this
 optional backup field.
 
+### Auto rules
+
+Open **Manage collections > Auto rules** to classify new downloads as they finish. A rule has
+conditions (a source site such as `bilibili.com`, a media type, a file format such as `.mp3`) and
+actions (add tags, add to manual collections, mark as favorite). Every condition in a rule must
+match; every enabled rule that matches applies. A site also matches its subdomains, so
+`bilibili.com` covers `www.bilibili.com` and `m.bilibili.com`.
+
+Rules only add classification: they never remove tags, collections or favorites, and never move,
+rename or delete files. They apply to completed downloads when they are saved to the Library, not
+to imported files, files already in the Library or processing-incomplete downloads. The task log
+shows which rules applied. Use **Turn off** to pause a rule without deleting it. A file keeps at
+most 20 tags. Deleting a manual collection removes it from rules, and a rule left with nothing to
+do is removed. Up to 50 rules can be saved per library. Auto rules are not yet included in
+backups.
+
 Files whose transfer finished but whose postprocessing did not finish are labeled
 **Processing incomplete** in Queue and Library. This includes unmerged video/audio streams and
 media whose requested conversion or cover embedding failed. The label persists across restarts

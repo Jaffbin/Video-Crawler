@@ -13,6 +13,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import grab_auto_rules
 from grab_models import http_url
 from grab_storage import SqliteLibraryStore
 from grab_images import IMAGE_SUFFIXES
@@ -88,17 +89,20 @@ class MediaLibrary:
 
     def load(self) -> dict:
         data = self.store.load({})
+        collections = {
+            key: value for key, value in (data.get("collections", {}) if isinstance(data, dict)
+                                         and isinstance(data.get("collections"), dict) else {}).items()
+            if re.fullmatch(r"[0-9a-f]{32}", key) and isinstance(value, str) and 0 < len(value) <= 80
+        }
         return {
             "version": 1,
             "files": data.get("files", {}) if isinstance(data, dict) and isinstance(data.get("files"), dict) else {},
             "trash": data.get("trash", {}) if isinstance(data, dict) and isinstance(data.get("trash"), dict) else {},
-            "collections": {
-                key: value for key, value in (data.get("collections", {}) if isinstance(data, dict)
-                                             and isinstance(data.get("collections"), dict) else {}).items()
-                if re.fullmatch(r"[0-9a-f]{32}", key) and isinstance(value, str) and 0 < len(value) <= 80
-            },
+            "collections": collections,
             "smart_collections": smart_collection_records(data.get("smart_collections", {}))
                                  if isinstance(data, dict) else {},
+            "auto_rules": grab_auto_rules.rule_records(data.get("auto_rules", {}), collections)
+                          if isinstance(data, dict) else {},
         }
 
     def collections(self) -> list[dict]:
@@ -108,6 +112,40 @@ class MediaLibrary:
     def smart_collections(self) -> list[dict]:
         with self.lock:
             return [{"id": key, **item} for key, item in self.load()["smart_collections"].items()]
+
+    def auto_rules(self) -> list[dict]:
+        with self.lock:
+            return [{"id": key, **item} for key, item in self.load()["auto_rules"].items()]
+
+    def change_auto_rule(self, action, rule_id=None, rule=None) -> str:
+        with self.lock:
+            data = self.load()
+            rule_id = grab_auto_rules.change(data["auto_rules"], action, rule_id, rule, data["collections"])
+            self.store.save(data)
+            return rule_id
+
+    def apply_auto_rules(self, relatives: list[str], kind_of) -> list[tuple[str, list[str]]]:
+        """Classify newly saved downloads. Returns (file, rule names) for each file a rule changed."""
+        with self.lock:
+            data = self.load()
+            rules = [rule for rule in data["auto_rules"].values() if rule["enabled"]]
+            if not rules:
+                return []
+            applied = []
+            for relative in dict.fromkeys(relatives):
+                record = data["files"].get(relative)
+                if not isinstance(record, dict) or record.get("complete") is False:
+                    continue
+                names = []
+                for rule in rules:
+                    if grab_auto_rules.matches(rule, relative, record, kind_of(relative)):
+                        grab_auto_rules.apply(rule, record, data["collections"])
+                        names.append(rule["name"])
+                if names:
+                    applied.append((relative, names))
+            if applied:
+                self.store.save(data)
+            return applied
 
     def change_smart_collection(self, action, name=None, collection_id=None, rules=None) -> str:
         with self.lock:
@@ -354,9 +392,11 @@ class MediaLibrary:
             for suffix in self.suffixes - IMAGE_SUFFIXES
         )
 
-    def remember(self, records: dict[str, dict]) -> None:
+    def remember(self, records: dict[str, dict]) -> list[str]:
+        """Save download metadata. Returns the library paths that were recorded."""
         with self.lock:
             data = self.load()
+            saved = []
             for relative, info in records.items():
                 try:
                     path = self.media_path(relative, allow_attachment=info.get("role") == "image")
@@ -386,7 +426,9 @@ class MediaLibrary:
                         key: info["repair_options"][key] for key in ("mode", "abr", "cover", "keep_cover", "embed_subs")
                         if key in info["repair_options"]
                     }
+                saved.append(relative)
             self.store.save(data)
+            return saved
 
     def companions(self, source: Path, *, records=None) -> list[Path]:
         """Only same-stem covers and same-stem/language-suffixed subtitles belong to media."""
