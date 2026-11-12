@@ -1,0 +1,48 @@
+name: Release
+
+# Publishes the Windows Portable ZIP and its SHA-256 file for a version tag such as v0.1.0.
+# Create the tag only after the version in pyproject.toml matches it.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check the tag matches the project version
+        shell: pwsh
+        run: |
+          $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match pyproject.toml version $version."
+          }
+      - name: Build the Windows Portable ZIP
+        shell: pwsh
+        run: ./scripts/build_portable.ps1
+      - name: Verify the checksum file matches the ZIP
+        shell: pwsh
+        run: |
+          $zip = "artifacts/video-grabber-windows-x64-portable.zip"
+          $expected = ((Get-Content "$zip.sha256" -Raw).Trim() -split "\s+")[0]
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+          if ($expected -ne $actual) { throw "Checksum mismatch: $expected vs $actual" }
+          Write-Host "SHA-256 $actual"
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" `
+            "artifacts/video-grabber-windows-x64-portable.zip" `
+            "artifacts/video-grabber-windows-x64-portable.zip.sha256" `
+            --title "Video Grabber $env:GITHUB_REF_NAME" `
+            --generate-notes
