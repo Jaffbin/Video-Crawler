@@ -31,3 +31,8 @@ frontend/dist/
 
 # Local release output
 artifacts/
+
+# Personal and private notes kept out of the public repository
+docs/SSH_KEY_GUIDE.md
+reports/
+research_notes/
