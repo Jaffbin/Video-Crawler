@@ -46,6 +46,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 
+import grab_plugins
 from grab_sites import hanime1_download_page, parse_hanime1_downloads
 
 try:
@@ -842,6 +843,7 @@ def run_diagnostics(output_dir: str | Path | None = None, net: bool = False) -> 
         + (f" (this yt-dlp needs {req})" if req else ""),
         fix="" if py_ok else "Install a newer Python from python.org."))
     checks.append(check_item("ytdlp", "yt-dlp", "ok", f"Version {yt_dlp.version.__version__}"))
+    checks.append(grab_plugins.diagnostics_row())
     if importlib.util.find_spec("curl_cffi"):
         checks.append(check_item("impersonation", "Browser impersonation", "ok",
                                  f"curl_cffi {_dist_version('curl-cffi') or 'installed'}"))

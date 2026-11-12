@@ -611,6 +611,18 @@ Telegram and ntfy receive only the title, the video title or link, and for failu
 **Send a test notification** in Settings checks every channel even while `enabled` is false.
 Settings shows only each channel's type and host; addresses and tokens never leave the file.
 
+## yt-dlp plugins
+
+yt-dlp plugins, such as a PO Token provider for YouTube or an extractor for an extra site, work in
+Video Grabber because yt-dlp loads them by itself. Put a plugin's folder or `.zip` file in
+`%APPDATA%\yt-dlp\plugins` (on macOS and Linux, `~/.config/yt-dlp/plugins`), or install it with
+`pip` into the same Python as Video Grabber, then restart the app.
+
+Open **Settings and help → Diagnostics** and look at **yt-dlp plugins** to confirm which plugin
+modules loaded and where they were found. Post-processor plugins are listed but not run.
+Plugins run with the same access as Video Grabber, so install only plugins you trust. Setting the
+`YTDLP_NO_PLUGINS` environment variable turns all plugins off.
+
 ## Language and connectivity
 
 English, Simplified Chinese, Traditional Chinese and Japanese are available from **Language**.
