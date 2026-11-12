@@ -23,8 +23,7 @@ export function SubscriptionsPanel({
   return (
     <section className="card grid content-start gap-4" aria-labelledby="subs-title">
       <div>
-        <div className="eyebrow">{t('Auto-download')}</div>
-        <h2 id="subs-title" className="mt-1 text-lg font-semibold">
+        <h2 id="subs-title" className="text-lg font-semibold">
           {t('Auto-download')}
           <span className="ml-2 text-sm font-normal text-zinc-400">
             {subscriptions.length > 0 &&

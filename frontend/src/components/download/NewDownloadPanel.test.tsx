@@ -354,3 +354,12 @@ it('keeps explanations behind question marks instead of showing grey helper text
   await user.click(help)
   expect(screen.queryByRole('note')).not.toBeInTheDocument()
 })
+
+it('puts the preset question mark on the label line, next to what it explains', () => {
+  render(<Panel />)
+  const help = screen.getByRole('button', { name: /what is this\? download preset/i })
+  const label = screen.getByText('Download preset')
+  expect(help.parentElement).toBe(label.parentElement)
+  expect(label.parentElement).toHaveClass('control-label')
+  expect(screen.getByLabelText('Download preset')).toBeInstanceOf(HTMLSelectElement)
+})

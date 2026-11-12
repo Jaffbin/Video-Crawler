@@ -26,6 +26,18 @@ afterEach(() => {
 })
 
 describe('AddSubscriptionForm', () => {
+  it('keeps the explanations behind question marks', async () => {
+    const user = userEvent.setup()
+    render(<AddSubscriptionForm options={DEFAULT_OPTIONS} onAdded={() => {}} onToast={() => {}} />)
+    expect(screen.queryByText(/taken from your current New download settings/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Duration filters apply only/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /what is this\? new subscriptions will download/i }))
+    expect(screen.getByRole('note')).toHaveTextContent(/taken from your current New download settings/)
+    await user.click(screen.getByRole('button', { name: /what is this\? filters/i }))
+    expect(screen.getAllByRole('note')).toHaveLength(2)
+    expect(screen.getByText(/Duration filters apply only/)).toBeInTheDocument()
+  })
+
   it('says up front which settings a new subscription will use', () => {
     render(
       <AddSubscriptionForm

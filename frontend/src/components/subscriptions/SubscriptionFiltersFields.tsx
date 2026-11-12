@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useI18n } from '../../i18n'
+import { HelpButton, HelpNote, useHelpTip } from '../ui/HelpTip'
 import type { SubscriptionFilters } from '../../types/api'
 
 export const EMPTY_FILTERS: SubscriptionFilters = {
@@ -52,6 +53,7 @@ export function SubscriptionFiltersFields({
   onChange: (filters: SubscriptionFilters) => void
 }) {
   const { t } = useI18n()
+  const tip = useHelpTip()
   const patch = (change: Partial<SubscriptionFilters>) => onChange({ ...filters, ...change })
   const minutes = (seconds: number) => (seconds ? Math.round(seconds / 60) : '')
   const seconds = (value: string) => Math.max(0, Math.round((Number(value) || 0) * 60))
@@ -99,7 +101,7 @@ export function SubscriptionFiltersFields({
           />
         </label>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <label className="toggle-row">
           <input
             type="checkbox"
@@ -116,10 +118,9 @@ export function SubscriptionFiltersFields({
           />
           {t('Exclude Shorts')}
         </label>
+        <HelpButton tip={tip} about={t('Filters (optional)')} />
       </div>
-      <p className="text-[11px] text-zinc-500">
-        {t('Duration filters apply only when the site reports a duration.')}
-      </p>
+      <HelpNote tip={tip}>{t('Duration filters apply only when the site reports a duration.')}</HelpNote>
     </fieldset>
   )
 }

@@ -7,6 +7,7 @@ import { describeOptions } from '../../lib/options'
 import type { BackfillMode, DownloadOptions } from '../../types/api'
 import { useI18n } from '../../i18n'
 import { Button } from '../ui/Button'
+import { HelpButton, HelpNote, useHelpTip } from '../ui/HelpTip'
 import { Segmented } from '../ui/Segmented'
 import { EMPTY_FILTERS, SubscriptionFiltersFields } from './SubscriptionFiltersFields'
 
@@ -19,6 +20,7 @@ interface Props {
 
 export function AddSubscriptionForm({ options, onAdded, onToast }: Props) {
   const { t } = useI18n()
+  const formatTip = useHelpTip()
   const [url, setUrl] = useState('')
   const [backfill, setBackfill] = useState<BackfillMode>('none')
   const [count, setCount] = useState(DEFAULT_BACKFILL_COUNT)
@@ -100,17 +102,20 @@ export function AddSubscriptionForm({ options, onAdded, onToast }: Props) {
         )}
       </div>
       <SubscriptionFiltersFields filters={filters} onChange={setFilters} />
-      <p className="rounded-xl bg-white/[.035] px-3 py-2 text-xs text-zinc-300" aria-live="polite">
-        {t('New subscriptions will download:')}{' '}
-        <span className="font-medium text-zinc-100">{describeOptions(options)}</span>
-        <span className="text-zinc-500">
-          {' '}
-          -{' '}
+      <div className="rounded-xl bg-white/[.035] px-3 py-2 text-xs text-zinc-300">
+        <div className="flex items-center gap-2">
+          <p className="min-w-0 flex-1" aria-live="polite">
+            {t('New subscriptions will download:')}{' '}
+            <span className="font-medium text-zinc-100">{describeOptions(options)}</span>
+          </p>
+          <HelpButton tip={formatTip} about={t('New subscriptions will download:')} />
+        </div>
+        <HelpNote tip={formatTip}>
           {t(
             'taken from your current New download settings. You can change this per subscription after adding it.',
           )}
-        </span>
-      </p>
+        </HelpNote>
+      </div>
     </div>
   )
 }

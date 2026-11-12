@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { useI18n } from '../../i18n'
 import type { DownloadOptions } from '../../types/api'
 import {
@@ -24,6 +24,7 @@ export function DownloadPresets({
 }) {
   const { t } = useI18n()
   const tip = useHelpTip()
+  const selectId = useId()
   const [custom, setCustom] = useState(readPresets)
   const [selected, setSelected] = useState('')
   const [editing, setEditing] = useState<DownloadPreset | 'new' | null>(null)
@@ -77,9 +78,13 @@ export function DownloadPresets({
   return (
     <div className="grid gap-2 rounded-xl border border-white/[.07] p-3">
       <div className="flex flex-wrap items-end gap-2">
-        <label className="control min-w-0 flex-1 basis-44">
-          <span>{t('Download preset')}</span>
+        <div className="control min-w-0 flex-1 basis-44">
+          <div className="control-label">
+            <label htmlFor={selectId}>{t('Download preset')}</label>
+            <HelpButton tip={tip} about={t('Download preset')} />
+          </div>
           <select
+            id={selectId}
             className="field"
             value={matching?.id || ''}
             disabled={disabled}
@@ -109,7 +114,7 @@ export function DownloadPresets({
               </optgroup>
             )}
           </select>
-        </label>
+        </div>
         <Button
           className="!px-2.5 !py-1.5 text-xs"
           disabled={disabled}
@@ -146,9 +151,6 @@ export function DownloadPresets({
             </Button>
           </>
         )}
-        <span className="ml-auto self-center">
-          <HelpButton tip={tip} about={t('Download preset')} />
-        </span>
       </div>
       <HelpNote tip={tip}>
         {t('Presets change output settings only. You can adjust them before downloading.')}
