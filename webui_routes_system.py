@@ -179,6 +179,16 @@ def system_post(app, h, path: str, body: dict) -> bool:
             h._json({"error": f"Could not create the settings file: {error}"}, 500)
         return True
 
+    if path == "/api/hooks/test-notifications":
+        if not h._session_cookie_ok():
+            h._json({"error": "Open Video Grabber to test notifications."}, 403)
+            return True
+        try:
+            h._json({"results": app.HOOKS.send_test(), "status": app.hooks_status()})
+        except ValueError as error:
+            h._json({"error": str(error)}, 409)
+        return True
+
     if path == "/api/cookies/delete":
         app.delete_cookies()
         h._json({"present": False})

@@ -527,12 +527,13 @@ Successful merges/conversions move superseded inputs into Recovery. Cancellation
 failure keeps originals intact. Missing/ambiguous inputs or missing requested covers/subtitles
 require downloading the original item again. A completed output is never overwritten.
 
-## Run a program after downloads
+## After downloads: programs and notifications
 
 Video Grabber can run a program of your choice after each download finishes or fails, for
-example a script that moves, converts or uploads the file. It is off by default.
+example a script that moves, converts or uploads the file, and send a message to Discord,
+Telegram, ntfy or your own web address. Both are off by default.
 
-Open **Settings and help → Run a program after downloads → Open settings file**. The first time,
+Open **Settings and help → After downloads → Open settings file**. The first time,
 this creates `hooks.json` in the settings folder (`%APPDATA%\grab-webui` on Windows) with hooks
 turned off. Programs can only be set by editing this file. The app and the Chrome extension cannot
 change it, so nothing that talks to the app can make it run a program.
@@ -575,6 +576,40 @@ passwords. Canceled downloads run nothing.
 
 Programs run one at a time in the background and never delay downloads. Settings shows the result
 of the last run; hover over it to see the end of the program's error output.
+
+### Notifications
+
+Add a `notifications` list to the same file. `enabled` turns programs and notifications on or off
+together. The template contains a `_notifications_example` list; rename it to `notifications` and
+fill in your own addresses.
+
+```json
+{
+  "enabled": true,
+  "language": "zh-CN",
+  "notifications": [
+    {"type": "discord", "url": "https://discord.com/api/webhooks/…"},
+    {"type": "telegram", "bot_token": "123456:ABC…", "chat_id": "123456789"},
+    {"type": "ntfy", "url": "https://ntfy.sh/your-topic", "token": "tk_…", "events": ["download_failed"]},
+    {"type": "webhook", "url": "https://example.com/hook", "headers": {"Authorization": "Bearer …"}}
+  ]
+}
+```
+
+- **Discord**: the channel's webhook URL (Channel settings → Integrations → Webhooks). Messages are
+  plain text and never mention anyone, even when a video title contains `@everyone`.
+- **Telegram**: the token from BotFather and your chat ID. Send your bot a message first so it is
+  allowed to reply.
+- **ntfy**: the full topic address, on ntfy.sh or your own server; `token` is optional.
+- **Webhook**: any address that accepts a JSON `POST`. It receives the same JSON a program gets
+  (including local file paths) plus `message.title` and `message.body`; `headers` is optional.
+- `events` is optional and limits a channel to `download_completed` or `download_failed`.
+- `language` sets the message language: `en`, `zh-CN`, `zh-TW` or `ja` (default `en`).
+
+Up to 10 channels are allowed; each message is tried once with a 10 second limit. Discord,
+Telegram and ntfy receive only the title, the video title or link, and for failures the error.
+**Send a test notification** in Settings checks every channel even while `enabled` is false.
+Settings shows only each channel's type and host; addresses and tokens never leave the file.
 
 ## Language and connectivity
 

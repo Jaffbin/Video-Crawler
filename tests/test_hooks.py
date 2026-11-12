@@ -43,7 +43,8 @@ def test_valid_settings_fill_in_the_default_timeout_and_ignore_comment_keys():
     config = parse_config({"_help": "notes", "enabled": True,
                            "hooks": {"download_failed": {"command": ["notify.exe", "--failed"]}}})
     assert config == {"enabled": True, "hooks": {"download_failed": {"command": ["notify.exe", "--failed"],
-                                                                     "timeout_seconds": 60}}}
+                                                                     "timeout_seconds": 60}},
+                      "notifications": [], "language": "en"}
 
 
 @pytest.mark.parametrize("raw, message", [
@@ -70,7 +71,8 @@ def test_invalid_settings_are_rejected_with_a_specific_reason(raw, message):
 
 def test_missing_broken_and_oversized_files_run_nothing(tmp_path):
     path = tmp_path / "hooks.json"
-    assert load_config(path) == {"enabled": False, "hooks": {}, "exists": False, "error": None}
+    assert load_config(path) == {"enabled": False, "hooks": {}, "notifications": [], "language": "en",
+                                 "exists": False, "error": None}
     path.write_text("{ not json", encoding="utf-8")
     broken = load_config(path)
     assert broken["exists"] and broken["error"] and broken["enabled"] is False and broken["hooks"] == {}
@@ -229,6 +231,29 @@ def test_a_full_queue_skips_and_reports_instead_of_blocking(tmp_path):
     assert runner.dispatch(make_job(tmp_path), tmp_path) is True
     assert runner.dispatch(make_job(tmp_path), tmp_path) is False
     assert runner.status()["pending"] == 1 and runner.status()["recent"][0]["outcome"] == "skipped"
+
+
+def test_an_unexpected_error_is_recorded_and_the_next_hook_still_runs(tmp_path):
+    calls = []
+
+    def flaky(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        return subprocess.CompletedProcess(command, 0)
+
+    config = tmp_path / "hooks.json"
+    write_config(config, {"enabled": True, "hooks": {"download_completed": {"command": ["x"]}}})
+    runner = HookRunner(lambda: config, run=flaky)
+    runner.dispatch(make_job(tmp_path), tmp_path)
+    runner.dispatch(make_job(tmp_path), tmp_path)
+    runner.start()
+    try:
+        wait_for(lambda: len(runner.status()["recent"]) == 2)
+    finally:
+        runner.stop()
+    newest, oldest = runner.status()["recent"]
+    assert oldest["outcome"] == "failed" and "boom" in oldest["detail"] and newest["outcome"] == "ok"
 
 
 def test_a_stopped_runner_accepts_no_more_work(tmp_path):

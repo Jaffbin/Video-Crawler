@@ -289,9 +289,15 @@ export interface SubscriptionPreview {
 
 export type HookEvent = 'download_completed' | 'download_failed'
 
+export type NotificationType = 'discord' | 'telegram' | 'ntfy' | 'webhook'
+
 export interface HookRun {
-  event: HookEvent
+  /** 'test' marks a test notification sent from Settings. */
+  event: HookEvent | 'test'
   job_id: string
+  kind: 'program' | 'notification'
+  /** Program file name, or channel type and host. Never a URL or token. */
+  target: string
   outcome: 'ok' | 'failed' | 'timeout' | 'not_started' | 'skipped'
   exit_code: number | null
   duration: number
@@ -306,6 +312,14 @@ export interface HooksStatus {
   enabled: boolean
   error: string | null
   hooks: Partial<Record<HookEvent, { command: string[]; timeout_seconds: number }>>
+  /** Only the channel type and host; addresses and tokens stay in the settings file. */
+  notifications: Array<{ type: NotificationType; target: string; events: HookEvent[] }>
+  language: string
   pending: number
   recent: HookRun[]
+}
+
+export interface NotificationTestResponse {
+  results: Array<{ target: string; ok: boolean; detail: string }>
+  status: HooksStatus
 }

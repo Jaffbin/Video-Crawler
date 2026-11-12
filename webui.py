@@ -57,6 +57,7 @@ from grab_backup import BACKUP_MAX_BYTES, BackupService  # noqa: E402,F401  (Bac
 from grab_repair import repair, repair_options  # noqa: E402
 from grab_archive import seed_archive  # noqa: E402
 from grab_hooks import HookRunner, ensure_config_file, load_config  # noqa: E402
+import grab_push  # noqa: E402
 from grab_errors import error_details, fmt_eta, fmt_speed, friendly_error, strip_ansi  # noqa: E402
 import grab_cookies  # noqa: E402
 import webui_routes_library  # noqa: E402
@@ -1258,7 +1259,10 @@ def hooks_status() -> dict:
     path = HOOKS.config_path()
     config = load_config(path)
     return {"path": str(path), "exists": config["exists"], "enabled": config["enabled"],
-            "error": config["error"], "hooks": config["hooks"], **HOOKS.status()}
+            "error": config["error"], "hooks": config["hooks"], "language": config["language"],
+            # Channel URLs and tokens are secrets; only the type and host leave this process.
+            "notifications": [grab_push.describe(channel) for channel in config["notifications"]],
+            **HOOKS.status()}
 
 
 def open_hooks_config() -> dict:

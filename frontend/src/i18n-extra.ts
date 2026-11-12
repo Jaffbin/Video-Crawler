@@ -2167,13 +2167,28 @@ export const extraMessages: Record<string, [string, string, string]> = {
   Downloading: ['下载中', '下載中', 'ダウンロード中'],
   Canceled: ['已取消', '已取消', 'キャンセル済み'],
   'That did not work': ['操作失败', '操作失敗', '操作に失敗'],
-  'Run a program after downloads': ['下载后运行程序', '下載後執行程式', 'ダウンロード後にプログラムを実行'],
-  'Runs a program you choose, such as a script that moves or converts the file. Details about the download are passed to it as JSON on standard input and in VG_ environment variables. For safety, programs can only be set in the settings file, not from the app or the browser extension.':
+  'After downloads': ['下载之后', '下載之後', 'ダウンロード後'],
+  'Run a program you choose, such as a script that moves or converts the file, and send a message to Discord, Telegram, ntfy or your own web address. For safety, these can only be set in the settings file, not from the app or the browser extension.':
     [
-      '运行你指定的程序，例如移动或转换文件的脚本。下载信息会以 JSON 通过标准输入传入，并写入 VG_ 开头的环境变量。为了安全，程序只能在设置文件中指定，不能在应用或浏览器扩展中设置。',
-      '執行你指定的程式，例如移動或轉換檔案的指令碼。下載資訊會以 JSON 透過標準輸入傳入，並寫入 VG_ 開頭的環境變數。為了安全，程式只能在設定檔中指定，不能在應用程式或瀏覽器擴充功能中設定。',
-      'ファイルを移動・変換するスクリプトなど、指定したプログラムを実行します。ダウンロードの情報は標準入力の JSON と VG_ で始まる環境変数で渡されます。安全のため、プログラムは設定ファイルでのみ指定でき、アプリやブラウザー拡張機能からは設定できません。',
+      '运行你指定的程序（例如移动或转换文件的脚本），并把消息发送到 Discord、Telegram、ntfy 或你自己的网址。为了安全，这些只能在设置文件中设置，不能在应用或浏览器扩展中设置。',
+      '執行你指定的程式（例如移動或轉換檔案的指令碼），並把訊息傳送到 Discord、Telegram、ntfy 或你自己的網址。為了安全，這些只能在設定檔中設定，不能在應用程式或瀏覽器擴充功能中設定。',
+      'ファイルを移動・変換するスクリプトなど指定したプログラムを実行し、Discord、Telegram、ntfy または独自の URL にメッセージを送ります。安全のため、これらは設定ファイルでのみ設定でき、アプリやブラウザー拡張機能からは設定できません。',
     ],
+  'finished downloads only': ['仅限完成的下载', '僅限完成的下載', '完了したダウンロードのみ'],
+  'failed downloads only': ['仅限失败的下载', '僅限失敗的下載', '失敗したダウンロードのみ'],
+  'Last notification to {target}: {result}': [
+    '上次通知 {target}：{result}',
+    '上次通知 {target}：{result}',
+    '前回の通知（{target}）：{result}',
+  ],
+  Sent: ['已发送', '已傳送', '送信しました'],
+  'Not sent': ['未发送', '未傳送', '送信できませんでした'],
+  'Test sent to {sent} of {total}.': [
+    '测试通知已发送：{sent}/{total}。',
+    '測試通知已傳送：{sent}/{total}。',
+    'テスト通知を送信しました：{sent}/{total}。',
+  ],
+  'Send a test notification': ['发送测试通知', '傳送測試通知', 'テスト通知を送信'],
   'The settings file has a problem, so nothing runs: {error}': [
     '设置文件有问题，因此不会运行任何程序：{error}',
     '設定檔有問題，因此不會執行任何程式：{error}',
