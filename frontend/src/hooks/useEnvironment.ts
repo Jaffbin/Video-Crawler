@@ -3,6 +3,7 @@ import { checkYtdlp, getDoctor } from '../api/client'
 import type { DoctorCheck, DoctorResult, YtdlpCheck } from '../types/api'
 
 const DISMISS_KEY = 'grab-env-dismissed'
+const UPDATE_DISMISS_KEY = 'grab-update-dismissed'
 /** The two things YouTube needs on top of yt-dlp itself. ffmpeg has its own banner. */
 const YOUTUBE_CHECKS = ['js_runtime', 'ejs']
 
@@ -16,9 +17,9 @@ export function issueSignature(issues: DoctorCheck[]): string {
   return issues.map((c) => c.id).join(',')
 }
 
-function readDismissed(): string {
+function readDismissed(key = DISMISS_KEY): string {
   try {
-    return localStorage.getItem(DISMISS_KEY) ?? ''
+    return localStorage.getItem(key) ?? ''
   } catch {
     return ''
   }
@@ -28,7 +29,8 @@ function readDismissed(): string {
 export function useEnvironment() {
   const [doctor, setDoctor] = useState<DoctorResult | null>(null)
   const [update, setUpdate] = useState<YtdlpCheck | null>(null)
-  const [dismissed, setDismissed] = useState(readDismissed)
+  const [dismissed, setDismissed] = useState(() => readDismissed())
+  const [dismissedUpdate, setDismissedUpdate] = useState(() => readDismissed(UPDATE_DISMISS_KEY))
 
   const refresh = useCallback(async () => {
     const [d, u] = await Promise.allSettled([getDoctor(false, false), checkYtdlp(false)])
@@ -53,5 +55,18 @@ export function useEnvironment() {
     setDismissed(signature)
   }, [signature])
 
-  return { doctor, update, issues, showBanner, dismiss, refresh }
+  // The banner returns when a still newer version is released.
+  const newVersion = update?.newer && update.latest ? update.latest : null
+  const updateVersion = newVersion && newVersion !== dismissedUpdate ? newVersion : null
+  const dismissUpdate = useCallback(() => {
+    if (!newVersion) return
+    try {
+      localStorage.setItem(UPDATE_DISMISS_KEY, newVersion)
+    } catch {
+      /* ignore */
+    }
+    setDismissedUpdate(newVersion)
+  }, [newVersion])
+
+  return { doctor, update, issues, showBanner, dismiss, refresh, updateVersion, dismissUpdate }
 }

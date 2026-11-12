@@ -1664,6 +1664,28 @@ export const extraMessages: Record<string, [string, string, string]> = {
       '讓 Video Grabber 的 Chrome 擴充功能能找到並連線到本應用程式。不使用擴充功能時請保持關閉。',
       'Video Grabber の Chrome 拡張機能がこのアプリを見つけて接続できるようにします。使わない場合はオフのままにしてください。',
     ],
+  'yt-dlp {version} is available. Sites change often, and updating fixes many download errors.': [
+    'yt-dlp {version} 已发布。网站经常变化，更新能修复很多下载错误。',
+    'yt-dlp {version} 已發布。網站經常變化，更新能修復很多下載錯誤。',
+    'yt-dlp {version} が利用可能です。サイトは頻繁に変わるため、更新すると多くのダウンロードエラーが直ります。',
+  ],
+  'yt-dlp was updated. Restart the app to use it.': [
+    'yt-dlp 已更新。重新启动应用后生效。',
+    'yt-dlp 已更新。重新啟動應用程式後生效。',
+    'yt-dlp を更新しました。アプリを再起動すると反映されます。',
+  ],
+  'Update now': ['立即更新', '立即更新', '今すぐ更新'],
+  'Open updates': ['打开更新', '開啟更新', '更新を開く'],
+  'YouTube downloads need the Deno helper to find every format.': [
+    'YouTube 下载需要 Deno 辅助组件才能找全所有格式。',
+    'YouTube 下載需要 Deno 輔助元件才能找全所有格式。',
+    'YouTube のダウンロードにはすべての形式を見つけるための Deno が必要です。',
+  ],
+  'YouTube downloads need one more yt-dlp component.': [
+    'YouTube 下载还需要一个 yt-dlp 组件。',
+    'YouTube 下載還需要一個 yt-dlp 元件。',
+    'YouTube のダウンロードには yt-dlp のコンポーネントがもう 1 つ必要です。',
+  ],
   'What is this?': ['这是什么？', '這是什麼？', 'これは何ですか？'],
   'Paste a link first': ['请先粘贴链接', '請先貼上連結', '先にリンクを貼り付けてください'],
   'Preview (optional)': ['预览（可选）', '預覽（選用）', 'プレビュー（任意）'],

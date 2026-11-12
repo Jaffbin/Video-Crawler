@@ -13,17 +13,20 @@ interface Props {
   onToast: ToastFn
   /** So the header dot clears once the check is known to be current. */
   onChecked: (check: YtdlpCheck) => void
+  /** Opened from "Update now": install a newer yt-dlp as soon as it is confirmed. */
+  autoStart?: boolean
 }
 
 type Phase = 'idle' | 'checking' | 'installing' | 'needs-restart' | 'done' | 'error'
 
-export function UpdateModal({ open, onClose, onRestart, onToast, onChecked }: Props) {
+export function UpdateModal({ open, onClose, onRestart, onToast, onChecked, autoStart }: Props) {
   const { t } = useI18n()
   const [check, setCheck] = useState<YtdlpCheck | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [log, setLog] = useState<string[]>([])
   const [error, setError] = useState('')
   const poller = useRef<number | undefined>(undefined)
+  const started = useRef(false)
 
   useEffect(() => {
     if (open) void refresh(true)
@@ -38,6 +41,10 @@ export function UpdateModal({ open, onClose, onRestart, onToast, onChecked }: Pr
       setCheck(c)
       onChecked(c)
       setPhase(c.needs_restart ? 'needs-restart' : 'idle')
+      if (autoStart && c.newer && !c.needs_restart && !started.current) {
+        started.current = true
+        void install('default')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : t('Could not check for updates'))
       setPhase('error')

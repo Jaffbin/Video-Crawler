@@ -110,6 +110,7 @@ function AppContent() {
   const [setupOpen, setSetupOpen] = useState(false)
   const setupConsidered = useRef(false)
   const [updateOpen, setUpdateOpen] = useState(false)
+  const [updateAuto, setUpdateAuto] = useState(false)
   const [installBusy, setInstallBusy] = useState(false)
   const [setupStage, setSetupStage] = useState('checking')
   const [downloadFocus, setDownloadFocus] = useState(0)
@@ -151,7 +152,9 @@ function AppContent() {
     onAnnounce: (m, bad) => toast(m, bad),
   })
 
-  const updateAttention = !!ytdlpCheck && (ytdlpCheck.newer || ytdlpCheck.needs_restart)
+  // The quiet check on load counts too; the modal's own result replaces it once the user has looked.
+  const updateInfo = ytdlpCheck ?? environment.update
+  const updateAttention = !!updateInfo && (updateInfo.newer || updateInfo.needs_restart)
 
   async function install(extras: ComponentExtras) {
     setInstallBusy(true)
@@ -286,6 +289,16 @@ function AppContent() {
           online={online}
           ffmpeg={state.ffmpeg}
           showYoutubeIssues={environment.showBanner}
+          youtubeIssueIds={environment.issues.map((issue) => issue.id)}
+          updateVersion={
+            ytdlpCheck ? (ytdlpCheck.newer ? ytdlpCheck.latest : null) : environment.updateVersion
+          }
+          updateNeedsRestart={!!updateInfo?.needs_restart}
+          onUpdate={() => {
+            setUpdateAuto(true)
+            setUpdateOpen(true)
+          }}
+          onDismissUpdate={environment.dismissUpdate}
           onOpenDiagnostics={() => setDoctorOpen(true)}
           onDismissYoutubeIssues={environment.dismiss}
         />
@@ -444,13 +457,18 @@ function AppContent() {
         <Suspense fallback={null}>
           <UpdateModal
             open={updateOpen}
-            onClose={() => setUpdateOpen(false)}
+            onClose={() => {
+              setUpdateOpen(false)
+              setUpdateAuto(false)
+            }}
             onRestart={() => {
               setUpdateOpen(false)
+              setUpdateAuto(false)
               void restartService()
             }}
             onToast={toast}
             onChecked={setYtdlpCheck}
+            autoStart={updateAuto}
           />
         </Suspense>
       )}
