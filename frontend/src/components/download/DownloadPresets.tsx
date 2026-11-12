@@ -10,6 +10,7 @@ import {
   type OutputOptions,
 } from '../../lib/presets'
 import { Button } from '../ui/Button'
+import { HelpButton, HelpNote, useHelpTip } from '../ui/HelpTip'
 import { Modal } from '../ui/Modal'
 
 export function DownloadPresets({
@@ -22,6 +23,7 @@ export function DownloadPresets({
   disabled: boolean
 }) {
   const { t } = useI18n()
+  const tip = useHelpTip()
   const [custom, setCustom] = useState(readPresets)
   const [selected, setSelected] = useState('')
   const [editing, setEditing] = useState<DownloadPreset | 'new' | null>(null)
@@ -144,10 +146,13 @@ export function DownloadPresets({
             </Button>
           </>
         )}
+        <span className="ml-auto self-center">
+          <HelpButton tip={tip} about={t('Download preset')} />
+        </span>
       </div>
-      <p className="text-xs text-zinc-400">
+      <HelpNote tip={tip}>
         {t('Presets change output settings only. You can adjust them before downloading.')}
-      </p>
+      </HelpNote>
       <Modal
         open={!!editing}
         title={t(editing === 'new' ? 'Save current as preset' : 'Rename preset')}

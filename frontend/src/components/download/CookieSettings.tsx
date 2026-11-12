@@ -4,6 +4,7 @@ import { BROWSERS } from '../../lib/options'
 import type { ToastFn } from '../../hooks/useToasts'
 import type { CookieStatus, DownloadOptions } from '../../types/api'
 import { useI18n } from '../../i18n'
+import { HelpButton, HelpNote, useHelpTip } from '../ui/HelpTip'
 
 interface Props {
   options: DownloadOptions
@@ -24,6 +25,7 @@ export function describeCookies(c: CookieStatus): string {
 
 export function CookieSettings({ options, onChange, onToast }: Props) {
   const { t } = useI18n()
+  const tip = useHelpTip()
   const [status, setStatus] = useState<CookieStatus>({ present: false })
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -112,7 +114,8 @@ export function CookieSettings({ options, onChange, onToast }: Props) {
       <div className="rounded-xl bg-white/[.035] px-3 py-2 text-xs text-zinc-300">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span>{cookieStatus}</span>
-          <span className="flex gap-2">
+          <span className="flex items-center gap-2">
+            <HelpButton tip={tip} about={t('Cookies (for logged-in or member-only videos)')} />
             <button
               type="button"
               className="rounded-lg bg-white/[.06] px-2.5 py-1.5 hover:bg-white/[.1]"
@@ -143,7 +146,7 @@ export function CookieSettings({ options, onChange, onToast }: Props) {
             if (f) void upload(f)
           }}
         />
-        <p className="mt-2 leading-5 text-zinc-400">
+        <HelpNote tip={tip}>
           {t(
             'Reading browser cookies can fail while the browser is open. Exporting cookies.txt avoids this. For YouTube, export from a private window and do not reuse that window afterwards.',
           )}{' '}
@@ -157,7 +160,7 @@ export function CookieSettings({ options, onChange, onToast }: Props) {
             {t('how to export')}
           </a>
           ). {t('The file is stored outside your download folder and each run uses its own copy.')}
-        </p>
+        </HelpNote>
       </div>
     </div>
   )

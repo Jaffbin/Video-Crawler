@@ -146,7 +146,7 @@ export function QueuePanel({
                 {t('Success rate')}: <strong>{successRate}%</strong> ({succeeded}/{measured})
               </div>
             )}
-            <Button variant="ghost" onClick={clear} disabled={!finished}>
+            <Button onClick={clear} disabled={!finished}>
               {t('Clear finished')}
             </Button>
           </div>
@@ -247,26 +247,26 @@ export function QueuePanel({
       ) : (
         <div className="grid min-w-0 grid-cols-1 gap-3">
           {shown.map((job) => (
-            <div key={job.id} className="grid min-w-0 grid-cols-1 gap-1">
-              <div className="flex items-center gap-2 text-xs text-zinc-400">
-                <label className="flex min-w-0 flex-1 items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(job.id)}
-                    aria-label={t('Select {name}', { name: job.title || job.url })}
-                    onChange={() =>
-                      setSelected((previous) => {
-                        const next = new Set(previous)
-                        next.has(job.id) ? next.delete(job.id) : next.add(job.id)
-                        return next
-                      })
-                    }
-                  />
-                  {job.status === 'queued' &&
-                    t('Waiting position: {count}', { count: queueOrder.indexOf(job.id) + 1 })}
-                </label>
+            <div key={job.id} className="flex min-w-0 items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-5 shrink-0"
+                checked={selected.has(job.id)}
+                aria-label={t('Select {name}', { name: job.title || job.url })}
+                onChange={() =>
+                  setSelected((previous) => {
+                    const next = new Set(previous)
+                    next.has(job.id) ? next.delete(job.id) : next.add(job.id)
+                    return next
+                  })
+                }
+              />
+              <div className="grid min-w-0 flex-1 grid-cols-1 gap-1">
                 {job.status === 'queued' && (
-                  <>
+                  <div className="flex items-center gap-2 text-xs text-zinc-400">
+                    <span className="min-w-0 flex-1">
+                      {t('Waiting position: {count}', { count: queueOrder.indexOf(job.id) + 1 })}
+                    </span>
                     <button
                       className="action-btn"
                       disabled={busy || queueOrder.indexOf(job.id) <= 0}
@@ -287,16 +287,16 @@ export function QueuePanel({
                     >
                       <ArrowDown size={14} />
                     </button>
-                  </>
+                  </div>
                 )}
+                <JobCard
+                  job={job}
+                  windowMode={windowMode}
+                  onChanged={onChanged}
+                  onToast={onToast}
+                  onHelp={onHelp}
+                />
               </div>
-              <JobCard
-                job={job}
-                windowMode={windowMode}
-                onChanged={onChanged}
-                onToast={onToast}
-                onHelp={onHelp}
-              />
             </div>
           ))}
         </div>

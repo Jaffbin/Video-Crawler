@@ -94,7 +94,7 @@ describe('SubscriptionCard', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: /edit format/i }))
     await userEvent.click(screen.getByRole('radio', { name: 'Audio' }))
-    await userEvent.selectOptions(screen.getByLabelText(/audio quality/i), '320')
+    await userEvent.selectOptions(screen.getByLabelText('Audio quality'), '320')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(requests.some((r) => r.url.endsWith('/update'))).toBe(true))

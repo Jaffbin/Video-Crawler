@@ -4,6 +4,7 @@ import type { ToastFn } from '../../hooks/useToasts'
 import type { DownloadOptions } from '../../types/api'
 import { CookieSettings } from './CookieSettings'
 import { useI18n } from '../../i18n'
+import { HelpButton, HelpNote, useHelpTip } from '../ui/HelpTip'
 
 interface Props {
   options: DownloadOptions
@@ -13,14 +14,32 @@ interface Props {
   playwright: boolean
 }
 
-function Section({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+type Tip = ReturnType<typeof useHelpTip>
+
+function Section({
+  icon,
+  title,
+  tip,
+  note,
+  children,
+}: {
+  icon: ReactNode
+  title: string
+  tip?: Tip
+  note?: ReactNode
+  children: ReactNode
+}) {
   return (
     <section>
       <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-300">
         {icon}
         {title}
+        {tip && <HelpButton tip={tip} about={title} />}
       </h3>
-      <div className="grid gap-2">{children}</div>
+      <div className="grid gap-2">
+        {tip && <HelpNote tip={tip}>{note}</HelpNote>}
+        {children}
+      </div>
     </section>
   )
 }
@@ -51,6 +70,7 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const panelId = useId()
+  const renderTip = useHelpTip()
   const number = (v: string) => (v === '' ? 0 : Number(v))
 
   return (
@@ -147,48 +167,41 @@ export function AdvancedSettings({ options, onChange, onToast, playwright }: Pro
                   onChange={(e) => onChange({ items: e.target.value })}
                 />
               </label>
-              <Toggle checked={options.no_playlist} onChange={(v) => onChange({ no_playlist: v })}>
-                {t('If the link belongs to a playlist, download only this video')}
-              </Toggle>
-              <Toggle checked={options.archive} onChange={(v) => onChange({ archive: v })}>
-                {t('Skip videos that were already downloaded')}
-              </Toggle>
             </Section>
           )}
 
           {(options.mode === 'mp4' || options.mode === 'mp3' || options.mode === 'original') && (
-            <Section icon={<MonitorCog aria-hidden size={14} />} title={t('Dynamic pages')}>
-              <Toggle
-                checked={options.js_render && playwright}
-                disabled={!playwright}
-                onChange={(v) => onChange({ js_render: v })}
-              >
-                {t('If no video is found, render the page in a headless browser')}
-              </Toggle>
-              <p className="text-xs leading-5 text-zinc-400">
-                {playwright
-                  ? t(
-                      'Playwright detected. On Windows the built-in Edge is used first, so no extra browser download is needed.',
-                    )
-                  : t(
-                      'Playwright is not installed. Run “pip install playwright” and restart to enable this.',
-                    )}
-              </p>
+            <Section
+              icon={<MonitorCog aria-hidden size={14} />}
+              title={t('Dynamic pages')}
+              tip={renderTip}
+              note={t(
+                playwright
+                  ? 'Playwright detected. On Windows the built-in Edge is used first, so no extra browser download is needed.'
+                  : 'Rendering pages in a browser is an optional extra that is not installed. Most links work without it.',
+              )}
+            >
+              {playwright && (
+                <Toggle checked={options.js_render} onChange={(v) => onChange({ js_render: v })}>
+                  {t('If no video is found, render the page in a headless browser')}
+                </Toggle>
+              )}
               <Toggle checked={options.all_sniffed} onChange={(v) => onChange({ all_sniffed: v })}>
                 {t('Download every media address found on a page, not just the first that works')}
               </Toggle>
-              <label className="control">
-                <span>{t('Longest wait for the page to play (seconds)')}</span>
-                <input
-                  className="field"
-                  type="number"
-                  min={2}
-                  max={30}
-                  value={options.js_wait}
-                  disabled={!playwright}
-                  onChange={(e) => onChange({ js_wait: number(e.target.value) })}
-                />
-              </label>
+              {playwright && (
+                <label className="control">
+                  <span>{t('Longest wait for the page to play (seconds)')}</span>
+                  <input
+                    className="field"
+                    type="number"
+                    min={2}
+                    max={30}
+                    value={options.js_wait}
+                    onChange={(e) => onChange({ js_wait: number(e.target.value) })}
+                  />
+                </label>
+              )}
             </Section>
           )}
         </div>

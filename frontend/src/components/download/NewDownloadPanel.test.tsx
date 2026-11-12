@@ -280,3 +280,77 @@ it('switches to cover and image modes, hides media conversion settings and submi
   await user.click(screen.getByRole('button', { name: 'Start download' }))
   expect(requests[0].mode).toBe('image')
 })
+
+it('shows the skip and single-video options without opening Advanced settings', async () => {
+  resetTokenCache()
+  const requests: any[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url, init) => {
+      requests.push(JSON.parse(init.body))
+      return new Response(JSON.stringify({ ids: ['1234abcd'] }))
+    }),
+  )
+  const user = userEvent.setup()
+  render(<Panel />)
+  const skip = screen.getByRole('checkbox', { name: 'Skip videos that were already downloaded' })
+  const single = screen.getByRole('checkbox', {
+    name: 'If the link belongs to a playlist, download only this video',
+  })
+  await user.click(skip)
+  await user.click(single)
+  await user.type(screen.getByRole('textbox', { name: /links to download/i }), 'https://example.com/video')
+  await user.click(screen.getByRole('button', { name: 'Start download' }))
+  await waitFor(() => expect(requests.length).toBeGreaterThan(0))
+  expect(requests[0].options).toMatchObject({ archive: true, no_playlist: true })
+})
+
+it('hides browser-rendering controls instead of showing disabled ones when Playwright is missing', async () => {
+  const user = userEvent.setup()
+  render(
+    <NewDownloadPanel
+      options={DEFAULT_OPTIONS}
+      onOptionsChange={() => {}}
+      playwright={false}
+      onToast={vi.fn()}
+      onAdded={vi.fn()}
+    />,
+  )
+  await user.click(screen.getByRole('button', { name: /advanced settings/i }))
+  await user.click(screen.getByRole('button', { name: /what is this\? dynamic pages/i }))
+  expect(screen.getByRole('note')).toHaveTextContent(/optional extra that is not installed/i)
+  expect(screen.queryByRole('checkbox', { name: /headless browser/i })).not.toBeInTheDocument()
+  expect(screen.queryByText(/longest wait for the page/i)).not.toBeInTheDocument()
+  expect(screen.getByRole('checkbox', { name: /every media address/i })).toBeEnabled()
+})
+
+it('marks the current step and explains why the buttons are disabled before a link is pasted', async () => {
+  const user = userEvent.setup()
+  render(<Panel />)
+  const steps = screen.getByRole('list', { name: 'Download steps' })
+  expect(within(steps).getAllByRole('listitem')[0]).toHaveAttribute('aria-current', 'step')
+  expect(screen.getByRole('button', { name: 'Start download' })).toHaveAttribute(
+    'title',
+    'Paste a link first',
+  )
+  await user.type(screen.getByRole('textbox', { name: /links to download/i }), 'https://example.com/video')
+  expect(within(steps).getAllByRole('listitem')[0]).toHaveTextContent('✓')
+  expect(within(steps).getAllByRole('listitem')[2]).toHaveAttribute('aria-current', 'step')
+  expect(screen.getByRole('button', { name: 'Start download' })).not.toHaveAttribute('title')
+})
+
+it('keeps explanations behind question marks instead of showing grey helper text', async () => {
+  const user = userEvent.setup()
+  render(<Panel />)
+  expect(screen.queryByText(/Skips videos you already have/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Presets change output settings only/)).not.toBeInTheDocument()
+  const help = screen.getByRole('button', {
+    name: /what is this\? skip videos that were already downloaded/i,
+  })
+  expect(help).toHaveAttribute('aria-expanded', 'false')
+  await user.click(help)
+  expect(help).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByRole('note')).toHaveTextContent(/Skips videos you already have/)
+  await user.click(help)
+  expect(screen.queryByRole('note')).not.toBeInTheDocument()
+})

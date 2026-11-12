@@ -2,6 +2,7 @@ import { FolderOpen, RefreshCw, Stethoscope } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
+import { ExtensionAccess } from './ExtensionAccess'
 
 interface Props {
   open: boolean
@@ -44,6 +45,7 @@ export function ToolsModal(p: Props) {
             </>
           )}
         </Button>
+        <ExtensionAccess />
       </div>
     </Modal>
   )

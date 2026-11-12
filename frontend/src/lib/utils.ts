@@ -14,7 +14,10 @@ export function formatBytes(bytes: number): string {
 
 /** Seconds since the epoch, as sent by the backend. */
 export function formatDate(ts: number): string {
-  return new Date(ts * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+  // Follow the interface language (set on <html lang>) instead of the system region, so an English UI
+  // never shows dates like 2026年10月16日.
+  const lang = typeof document === 'undefined' ? '' : document.documentElement.lang
+  return new Date(ts * 1000).toLocaleString(lang || [], { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 export function formatDuration(totalSeconds: number): string {

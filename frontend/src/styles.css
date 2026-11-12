@@ -219,14 +219,62 @@ select.field option {
   background-color: var(--ui-input);
   color: var(--ui-text);
 }
+/* Group labels otherwise fall back to the browser's light default and vanish in dark mode. */
+select.field optgroup {
+  background-color: var(--ui-input);
+  color: var(--ui-muted);
+  font-style: normal;
+  font-weight: 600;
+}
 
 .control {
   display: grid;
   min-width: 0;
   gap: 0.4rem;
 }
-.control > span {
+.control > span,
+.control > .control-label {
   font-size: 12px;
+  color: var(--ui-muted);
+}
+.control-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.help-tip {
+  position: relative;
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 1px solid rgba(var(--ui-rgb), 0.2);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ui-muted);
+  transition: 0.15s;
+}
+/* Enlarges the tap target without making the mark itself bigger. */
+.help-tip::after {
+  content: '';
+  position: absolute;
+  inset: -0.4rem;
+}
+.help-tip:hover,
+.help-tip[aria-expanded='true'] {
+  border-color: rgba(var(--ui-rgb), 0.45);
+  background: rgba(var(--ui-rgb), 0.06);
+  color: var(--ui-text);
+}
+.help-note {
+  border-radius: 0.75rem;
+  background: rgba(var(--ui-rgb), 0.035);
+  padding: 0.5rem 0.75rem;
+  font-size: 12px;
+  line-height: 1.25rem;
   color: var(--ui-muted);
 }
 
@@ -331,7 +379,8 @@ select.field option {
 .compact-actions {
   gap: 0.4rem;
 }
-.compact-actions > button {
+.compact-actions > button,
+.library-controls > button {
   gap: 0.4rem;
   border-radius: 0.6rem;
   padding: 0.4rem 0.6rem;
@@ -395,6 +444,10 @@ select.field option {
   min-width: 0;
   align-content: start;
   gap: 1rem;
+}
+.download-advanced {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 .download-links {
   min-height: 6rem;

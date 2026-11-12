@@ -8,6 +8,7 @@ import { extractUrls, looksLikeTextFile, mergeUrls, readUrls } from '../../lib/u
 import type { DownloadOptions, ProbeResult } from '../../types/api'
 import { Button } from '../ui/Button'
 import { AdvancedSettings } from './AdvancedSettings'
+import { HelpButton, HelpNote, useHelpTip } from '../ui/HelpTip'
 import { FormatQualityFields } from './FormatQualityFields'
 import { ProbeCard } from './ProbeCard'
 import { useI18n } from '../../i18n'
@@ -64,6 +65,8 @@ export function NewDownloadPanel({
   folderChangeBlocked = false,
 }: Props) {
   const { t } = useI18n()
+  const skipTip = useHelpTip()
+  const linksTip = useHelpTip()
   const [urls, setUrls] = useState('')
   const [existing, setExisting] = useState<{
     urls: string[]
@@ -109,6 +112,17 @@ export function NewDownloadPanel({
     selectedPlaylist === null
       ? options
       : { ...options, items: selectedPlaylist.join(','), no_playlist: false }
+  // Playlist-related changes invalidate the current preview and selection.
+  const changeBatchOption = (change: Partial<DownloadOptions>) => {
+    if ('items' in change) {
+      setSelectedPlaylist(null)
+    }
+    if ('no_playlist' in change) {
+      setSelectedPlaylist(null)
+      setProbeResult(null)
+    }
+    patch(change)
+  }
   const mp3 = options.mode === 'mp3' || options.mode === 'original'
   const originalAudio = options.mode === 'original'
   const picture = options.mode === 'cover' || options.mode === 'image'
@@ -221,8 +235,7 @@ export function NewDownloadPanel({
 
       <div className="flex items-center justify-between">
         <div>
-          <div className="eyebrow">{t('New download')}</div>
-          <h2 id="new-download" className="mt-1 text-lg font-semibold">
+          <h2 id="new-download" className="text-lg font-semibold">
             {t('Paste links to download')}
           </h2>
         </div>
@@ -238,12 +251,20 @@ export function NewDownloadPanel({
             aria-label={t('Download steps')}
           >
             {[t('Paste a link'), t('Preview (optional)'), t('Download and follow the queue')].map(
-              (step, index) => (
-                <li key={step} className="rounded-xl bg-white/[.025] p-3">
-                  <span className="mr-2 text-emerald-300">{index + 1}</span>
-                  {step}
-                </li>
-              ),
+              (step, index) => {
+                const done = index === 0 ? links.length > 0 : index === 1 ? !!probeResult : false
+                const current = index === (links.length ? 2 : 0)
+                return (
+                  <li
+                    key={step}
+                    aria-current={current ? 'step' : undefined}
+                    className={`rounded-xl px-3 py-2 ${current ? 'bg-white/[.07] text-zinc-100' : 'bg-white/[.025]'}`}
+                  >
+                    <span className="mr-2 text-emerald-300">{done ? '✓' : index + 1}</span>
+                    {step}
+                  </li>
+                )
+              },
             )}
           </ol>
 
@@ -272,6 +293,11 @@ export function NewDownloadPanel({
               >
                 <FileUp aria-hidden size={14} /> {t('Import from file')}
               </Button>
+              {links.length > 1 && (
+                <span className="self-center">
+                  <HelpButton tip={linksTip} about={t('Paste links to download')} />
+                </span>
+              )}
               <input
                 ref={fileInput}
                 type="file"
@@ -286,6 +312,15 @@ export function NewDownloadPanel({
               />
             </div>
           </div>
+
+          <DownloadPresets
+            options={options}
+            disabled={busy !== null}
+            onApply={(value) => {
+              patch(value)
+              clearPreview()
+            }}
+          />
 
           {probeResult && (
             <ProbeCard
@@ -312,21 +347,11 @@ export function NewDownloadPanel({
             />
           )}
 
-          {links.length > 1 && (
-            <p className="text-xs text-zinc-400">
-              {t('Preview analyzes the first link; Start download adds all links.')}
-            </p>
-          )}
+          <HelpNote tip={linksTip}>
+            {t('Preview analyzes the first link; Start download adds all links.')}
+          </HelpNote>
         </div>
         <div className="download-settings">
-          <DownloadPresets
-            options={options}
-            disabled={busy !== null}
-            onApply={(value) => {
-              patch(value)
-              clearPreview()
-            }}
-          />
           <FormatQualityFields
             options={selectedOptions}
             onChange={(change) => {
@@ -352,6 +377,27 @@ export function NewDownloadPanel({
                   : 'Paste direct image URLs, one per line. JPG, PNG, WebP, GIF and AVIF; up to 100 MiB each. Article pages and albums are not supported.',
               )}
             </p>
+          )}
+
+          {options.mode !== 'image' && (
+            <div className="grid gap-2">
+              <Toggle checked={options.no_playlist} onChange={(v) => changeBatchOption({ no_playlist: v })}>
+                {t('If the link belongs to a playlist, download only this video')}
+              </Toggle>
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <Toggle checked={options.archive} onChange={(v) => changeBatchOption({ archive: v })}>
+                    {t('Skip videos that were already downloaded')}
+                  </Toggle>
+                </div>
+                <HelpButton tip={skipTip} about={t('Skip videos that were already downloaded')} />
+              </div>
+              <HelpNote tip={skipTip}>
+                {t(
+                  'Skips videos you already have in Library, also inside playlists. Video and audio are tracked separately; deleted files are downloaded again.',
+                )}
+              </HelpNote>
+            </div>
           )}
 
           {!picture && (
@@ -407,26 +453,20 @@ export function NewDownloadPanel({
             </details>
           )}
 
-          <AdvancedSettings
-            options={options}
-            onChange={(change) => {
-              if ('items' in change) {
-                setSelectedPlaylist(null)
-              }
-              if ('no_playlist' in change) {
-                setSelectedPlaylist(null)
-                setProbeResult(null)
-              }
-              patch(change)
-            }}
-            onToast={onToast}
-            playwright={playwright}
-          />
           {selectedPlaylist?.length === 0 && (
             <p role="alert" className="text-xs text-amber-200">
               {t('Select at least one playlist entry.')}
             </p>
           )}
+        </div>
+        {/* Spans both columns so the long expert settings never stretch only the right column. */}
+        <div className="download-advanced">
+          <AdvancedSettings
+            options={options}
+            onChange={changeBatchOption}
+            onToast={onToast}
+            playwright={playwright}
+          />
         </div>
       </div>
 
@@ -484,7 +524,11 @@ export function NewDownloadPanel({
           )}
         </div>
         <div className="download-actions grid grid-cols-2 gap-2">
-          <Button onClick={analyze} disabled={changingFolder || busy !== null || !links.length}>
+          <Button
+            onClick={analyze}
+            disabled={changingFolder || busy !== null || !links.length}
+            title={links.length ? undefined : t('Paste a link first')}
+          >
             {busy === 'probe' ? (
               <Loader2 aria-hidden size={16} className="animate-spin" />
             ) : (
@@ -496,6 +540,13 @@ export function NewDownloadPanel({
             variant="primary"
             onClick={() => void start()}
             disabled={changingFolder || busy !== null || !links.length || selectedPlaylist?.length === 0}
+            title={
+              !links.length
+                ? t('Paste a link first')
+                : selectedPlaylist?.length === 0
+                  ? t('Select at least one playlist entry.')
+                  : undefined
+            }
           >
             {busy === 'add' ? (
               <Loader2 aria-hidden size={16} className="animate-spin" />

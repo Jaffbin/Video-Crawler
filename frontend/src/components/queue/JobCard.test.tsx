@@ -110,3 +110,24 @@ it('opens the download folder for disk errors and preserves technical logs on de
   await user.click(screen.getByRole('button', { name: 'Log' }))
   expect(await screen.findByText(/ERROR: technical failure/)).toBeInTheDocument()
 })
+
+it('does not repeat the file name under a finished download with one file', () => {
+  const file = { name: 'Only file [abc].mp4', path: 'Only file [abc].mp4', complete: true }
+  const done = { ...job, status: 'done' as const, error: '', files: [file] }
+  const { rerender } = render(
+    <JobCard job={done} windowMode={false} onChanged={() => {}} onToast={() => {}} />,
+  )
+  expect(screen.queryByText(/Only file/)).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Play video' })).toBeInTheDocument()
+  const second = { ...file, name: 'Second [def].mp4', path: 'Second [def].mp4' }
+  rerender(
+    <JobCard
+      job={{ ...done, files: [file, second] }}
+      windowMode={false}
+      onChanged={() => {}}
+      onToast={() => {}}
+    />,
+  )
+  expect(screen.getByText(/Only file/)).toBeInTheDocument()
+  expect(screen.getByText(/Second/)).toBeInTheDocument()
+})

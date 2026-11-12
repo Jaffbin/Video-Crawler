@@ -90,6 +90,7 @@ export function Header(p: Props) {
           {p.notification !== 'server' && p.notification !== 'unsupported' && (
             <Button
               variant="ghost"
+              className="!text-xs"
               onClick={p.onNotify}
               disabled={p.notification === 'denied'}
               aria-label={notifyLabel}

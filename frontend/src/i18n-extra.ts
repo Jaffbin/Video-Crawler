@@ -1653,6 +1653,19 @@ export const extraMessages: Record<string, [string, string, string]> = {
     'ダウンロードが完了すると取得元とファイルの詳細がここに表示されます。',
   ],
   'Paste a link': ['粘贴链接', '貼上連結', 'リンクを貼り付ける'],
+  'Allow the Chrome extension to connect': [
+    '允许 Chrome 扩展连接',
+    '允許 Chrome 擴充功能連線',
+    'Chrome 拡張機能の接続を許可する',
+  ],
+  'Lets the Video Grabber Chrome extension find and connect to this app. Leave this off if you do not use it.':
+    [
+      '让 Video Grabber 的 Chrome 扩展能找到并连接本应用。不使用扩展时请保持关闭。',
+      '讓 Video Grabber 的 Chrome 擴充功能能找到並連線到本應用程式。不使用擴充功能時請保持關閉。',
+      'Video Grabber の Chrome 拡張機能がこのアプリを見つけて接続できるようにします。使わない場合はオフのままにしてください。',
+    ],
+  'What is this?': ['这是什么？', '這是什麼？', 'これは何ですか？'],
+  'Paste a link first': ['请先粘贴链接', '請先貼上連結', '先にリンクを貼り付けてください'],
   'Preview (optional)': ['预览（可选）', '預覽（選用）', 'プレビュー（任意）'],
   'Download and follow the queue': ['下载并查看队列', '下載並查看佇列', 'ダウンロードしてキューを確認'],
   'Use a video page, playlist, or direct media link.': [
@@ -1896,6 +1909,12 @@ export const extraMessages: Record<string, [string, string, string]> = {
     '略過已下載的影片',
     'ダウンロード済み動画をスキップ',
   ],
+  'Skips videos you already have in Library, also inside playlists. Video and audio are tracked separately; deleted files are downloaded again.':
+    [
+      '跳过资料库里已有的视频，播放列表中的也一样。视频和音频分开记录，已删除的文件会重新下载。',
+      '略過資料庫裡已有的影片，播放清單中的也一樣。影片和音訊分開記錄，已刪除的檔案會重新下載。',
+      'ライブラリにある動画はプレイリスト内のものも含めてスキップします。動画と音声は別々に記録され、削除したファイルは再ダウンロードされます。',
+    ],
   'Dynamic pages': ['动态页面', '動態頁面', '動的ページ'],
   'If no video is found, render the page in a headless browser': [
     '找不到视频时，使用无界面浏览器渲染页面',
@@ -1908,10 +1927,10 @@ export const extraMessages: Record<string, [string, string, string]> = {
       '已偵測到 Playwright。Windows 會優先使用 Edge，無需額外下載瀏覽器。',
       'Playwright を検出しました。Windows では Edge を優先使用します。',
     ],
-  'Playwright is not installed. Run “pip install playwright” and restart to enable this.': [
-    '尚未安装 Playwright。运行“pip install playwright”并重启以启用。',
-    '尚未安裝 Playwright。執行「pip install playwright」並重新啟動以啟用。',
-    'Playwright が未インストールです。「pip install playwright」を実行して再起動してください。',
+  'Rendering pages in a browser is an optional extra that is not installed. Most links work without it.': [
+    '浏览器渲染页面是可选的附加功能，目前未安装。大多数链接无需它也能下载。',
+    '瀏覽器渲染頁面是選用的附加功能，目前未安裝。大多數連結不需要它也能下載。',
+    'ブラウザーでのページ描画はオプション機能で、現在はインストールされていません。ほとんどのリンクはなくても取得できます。',
   ],
   'Download every media address found on a page, not just the first that works': [
     '下载页面上找到的全部媒体地址，而非仅第一个可用地址',

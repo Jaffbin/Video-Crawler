@@ -667,31 +667,27 @@ export function FileGallery({
         </div>
       )}
 
-      {scan && (
-        <div
-          role="status"
-          className={`library-scan ${scan.incomplete ? '' : 'library-scan-complete'} grid gap-1 text-xs text-zinc-400`}
-        >
+      {/* Scan counts only matter to the user when something was skipped. */}
+      {scan?.incomplete && (
+        <div role="status" className="library-scan grid gap-1 text-xs text-zinc-400">
           <p>
             {t('Scanned {checked} entries; found {count} media files.', {
               checked: scan.checked,
               count: scan.media_count,
             })}
           </p>
-          {scan.incomplete && (
-            <div className="grid gap-1 text-amber-200">
-              <p>{t('The library scan is incomplete. Search and filters cover discovered files only.')}</p>
-              {scan.reasons.includes('entry_limit') && (
-                <p>{t('Scan limit reached ({limit} entries).', { limit: scan.entry_limit })}</p>
-              )}
-              {scan.reasons.includes('depth_limit') && (
-                <p>{t('Folders beyond {depth} directory levels were skipped.', { depth: scan.max_depth })}</p>
-              )}
-              {scan.reasons.includes('unreadable') && (
-                <p>{t('Some files or folders could not be read. Check permissions and refresh.')}</p>
-              )}
-            </div>
-          )}
+          <div className="grid gap-1 text-amber-200">
+            <p>{t('The library scan is incomplete. Search and filters cover discovered files only.')}</p>
+            {scan.reasons.includes('entry_limit') && (
+              <p>{t('Scan limit reached ({limit} entries).', { limit: scan.entry_limit })}</p>
+            )}
+            {scan.reasons.includes('depth_limit') && (
+              <p>{t('Folders beyond {depth} directory levels were skipped.', { depth: scan.max_depth })}</p>
+            )}
+            {scan.reasons.includes('unreadable') && (
+              <p>{t('Some files or folders could not be read. Check permissions and refresh.')}</p>
+            )}
+          </div>
         </div>
       )}
 
@@ -868,7 +864,9 @@ export function FileGallery({
                   </p>
                 )}
                 <p className="mt-1 truncate text-xs text-zinc-500">
-                  {f.source === 'local' ? t('Local file') : f.source || t('Unknown source')} · {f.path}
+                  {f.source === 'local' ? t('Local file') : f.source || t('Unknown source')}
+                  {/* The file name is already the heading, so only add the folder when there is one. */}
+                  {f.path.includes('/') ? ` · ${f.path.slice(0, f.path.lastIndexOf('/'))}` : ''}
                 </p>
                 {!!f.tags?.length && (
                   <p className="mt-1 truncate text-xs text-emerald-300">{f.tags.join(' · ')}</p>

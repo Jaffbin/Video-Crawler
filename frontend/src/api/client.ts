@@ -22,6 +22,7 @@ import type { BrowserPreferences, BackupReview } from '../lib/backup'
 
 const PLACEHOLDER = '__GRAB_TOKEN__'
 let cachedToken: string | null = null
+let tokenFromPage = false
 
 /**
  * The backend writes this run's random token into <meta name="grab-token">.
@@ -32,7 +33,8 @@ export function getToken(): string {
   const metaToken = document.querySelector<HTMLMetaElement>('meta[name="grab-token"]')?.content
   const queryToken = new URLSearchParams(location.search).get('t') ?? ''
   const envToken = (import.meta.env.VITE_API_TOKEN as string | undefined) ?? ''
-  const token: string = metaToken && metaToken !== PLACEHOLDER ? metaToken : queryToken || envToken
+  tokenFromPage = !!metaToken && metaToken !== PLACEHOLDER
+  const token: string = tokenFromPage ? metaToken! : queryToken || envToken
   cachedToken = token
   return token
 }
@@ -40,12 +42,17 @@ export function getToken(): string {
 /** Test helper: forget the cached token. */
 export function resetTokenCache(): void {
   cachedToken = null
+  tokenFromPage = false
 }
 
-/** Links (<a href>) cannot send headers, so the token travels in the query string. */
+/**
+ * Links and media elements cannot send headers. Served by the app itself they are authorized by the
+ * HttpOnly session cookie, so no token appears in the URL. Only the dev server (no cookie) falls back to ?t=.
+ */
 export function fileUrl(path: string): string {
   const encoded = path.split('/').map(encodeURIComponent).join('/')
-  return `/files/${encoded}?t=${encodeURIComponent(getToken())}`
+  const token = getToken()
+  return tokenFromPage || !token ? `/files/${encoded}` : `/files/${encoded}?t=${encodeURIComponent(token)}`
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -191,6 +198,10 @@ export const openExternalUrl = async (url: string) => {
   if (!result.ok) throw new Error('Could not open it')
 }
 export const getCookies = () => api<CookieStatus>('/api/cookies')
+
+export const getAccess = () => api<{ extension: boolean }>('/api/access')
+export const setExtensionAccess = (extension: boolean) =>
+  api<{ extension: boolean }>('/api/access', { method: 'POST', body: JSON.stringify({ extension }) })
 export const uploadCookies = (text: string) => post<CookieStatus>('/api/cookies', { text })
 export const deleteCookies = () => post<CookieStatus>('/api/cookies/delete')
 export const getDoctor = (net = false, force = true) =>

@@ -178,7 +178,9 @@ export function JobCard({ job, windowMode, onChanged, onToast, onHelp }: Props) 
         )}
         style={{ width: `${fullBar ? 100 : percent}%` }}
       />
-      <div className="relative grid min-w-0 grid-cols-1 gap-3 p-4">
+      <div
+        className={cn('relative grid min-w-0 grid-cols-1', job.status === 'done' ? 'gap-2 p-3' : 'gap-3 p-4')}
+      >
         <div className="flex items-start gap-3">
           <div
             aria-hidden
@@ -274,7 +276,8 @@ export function JobCard({ job, windowMode, onChanged, onToast, onHelp }: Props) 
           </details>
         )}
 
-        {job.files.length > 0 && (
+        {/* A single finished file repeats the title above, so only list files when there is more to tell. */}
+        {job.files.length > 0 && !(job.status === 'done' && job.files.length === 1 && primary) && (
           <ul className="grid min-w-0 grid-cols-1 gap-1">
             {job.files.map((file) => (
               <li key={file.path} className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
@@ -307,7 +310,7 @@ export function JobCard({ job, windowMode, onChanged, onToast, onHelp }: Props) 
         )}
 
         {job.status === 'done' && primary && (
-          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-emerald-500/10 p-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-2">
             <span className="mr-auto text-sm text-emerald-200">{t('Your download is ready.')}</span>
             {windowMode ? (
               <Button variant="primary" onClick={() => openFile(primary.path).catch(report)}>

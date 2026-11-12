@@ -1,6 +1,7 @@
-import { useRef } from 'react'
+import { useId, useRef } from 'react'
 import { audioQualityLabel } from '../../lib/options'
 import type { DownloadMode, DownloadOptions } from '../../types/api'
+import { HelpButton, HelpNote, useHelpTip } from '../ui/HelpTip'
 import { Segmented } from '../ui/Segmented'
 import { useI18n } from '../../i18n'
 
@@ -31,6 +32,10 @@ export function FormatQualityFields({
   allowImages = false,
 }: Props) {
   const { t } = useI18n()
+  const fieldId = useId()
+  const audioTip = useHelpTip()
+  const mp3Tip = useHelpTip()
+  const qualityTip = useHelpTip()
   const lastAudio = useRef<DownloadMode>('mp3')
   const lastImage = useRef<DownloadMode>('cover')
   if (options.mode === 'mp3' || options.mode === 'original') lastAudio.current = options.mode
@@ -94,20 +99,31 @@ export function FormatQualityFields({
           {t('Save the original image format. No ffmpeg conversion is needed.')}
         </p>
       ) : options.mode === 'original' ? (
-        <div className="grid gap-1 text-xs text-zinc-400">
-          <p className="text-sm text-zinc-200">{t('Best available audio · no re-encoding')}</p>
-          <p>
-            {t(
-              'The source determines the format, such as M4A or Opus. Some older players may not support it.',
-            )}
-          </p>
-          <p>{t('This preserves the audio offered by the site, not necessarily the original recording.')}</p>
+        <div className="grid gap-2">
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-zinc-200">{t('Best available audio · no re-encoding')}</p>
+            <HelpButton tip={audioTip} about={t('Keep source audio')} />
+          </div>
+          <HelpNote tip={audioTip}>
+            <p>
+              {t(
+                'The source determines the format, such as M4A or Opus. Some older players may not support it.',
+              )}
+            </p>
+            <p>
+              {t('This preserves the audio offered by the site, not necessarily the original recording.')}
+            </p>
+          </HelpNote>
         </div>
       ) : mp3 ? (
         <div className="grid gap-2">
-          <label className="control">
-            <span>{t('Audio quality')}</span>
+          <div className="control">
+            <div className="control-label">
+              <label htmlFor={`${fieldId}-abr`}>{t('Audio quality')}</label>
+              <HelpButton tip={mp3Tip} about={t('Audio quality')} />
+            </div>
             <select
+              id={`${fieldId}-abr`}
               className="field"
               value={options.abr}
               onChange={(e) => onChange({ abr: Number(e.target.value) })}
@@ -118,12 +134,12 @@ export function FormatQualityFields({
                 </option>
               ))}
             </select>
-          </label>
-          <p className="text-xs text-zinc-400">
+          </div>
+          <HelpNote tip={mp3Tip}>
             {t(
               'The best available source audio is used. A higher MP3 bitrate cannot restore details missing from the source.',
             )}
-          </p>
+          </HelpNote>
           <details className="text-xs text-zinc-400">
             <summary className="cursor-pointer">{t('Custom bitrate')}</summary>
             <label className="control mt-2">
@@ -143,9 +159,15 @@ export function FormatQualityFields({
           </details>
         </div>
       ) : (
-        <label className="control">
-          <span>{t('Maximum video quality')}</span>
+        <div className="control">
+          <div className="control-label">
+            <label htmlFor={`${fieldId}-quality`}>{t('Maximum video quality')}</label>
+            {showAnalyzeHint && !analyzed && (
+              <HelpButton tip={qualityTip} about={t('Maximum video quality')} />
+            )}
+          </div>
           <select
+            id={`${fieldId}-quality`}
             className="field"
             value={options.quality}
             onChange={(e) => onChange({ quality: e.target.value })}
@@ -164,11 +186,9 @@ export function FormatQualityFields({
             </span>
           )}
           {showAnalyzeHint && !analyzed && (
-            <span className="text-[11px] text-zinc-500">
-              {t('Analyze the link to see available resolutions')}
-            </span>
+            <HelpNote tip={qualityTip}>{t('Analyze the link to see available resolutions')}</HelpNote>
           )}
-        </label>
+        </div>
       )}
     </div>
   )

@@ -59,10 +59,14 @@ describe('FormatQualityFields', () => {
     expect(screen.getByText('2 resolutions detected')).toBeInTheDocument()
   })
 
-  it('shows the analyze hint only where analyzing is possible', () => {
+  it('explains how to get resolutions only where analyzing is possible, behind a help button', async () => {
+    const user = userEvent.setup()
     const { rerender } = render(<FormatQualityFields options={video} onChange={() => {}} showAnalyzeHint />)
-    expect(screen.getByText(/analyze the link/i)).toBeInTheDocument()
+    expect(screen.queryByText(/analyze the link/i)).toBeNull()
+    await user.click(screen.getByRole('button', { name: /what is this\? maximum video quality/i }))
+    expect(screen.getByRole('note')).toHaveTextContent(/analyze the link/i)
     rerender(<FormatQualityFields options={video} onChange={() => {}} />)
+    expect(screen.queryByRole('button', { name: /what is this/i })).toBeNull()
     expect(screen.queryByText(/analyze the link/i)).toBeNull()
   })
 
@@ -83,7 +87,7 @@ describe('FormatQualityFields', () => {
   it('switches to a bitrate picker for MP3', () => {
     render(<FormatQualityFields options={{ ...video, mode: 'mp3' }} onChange={() => {}} />)
     expect(screen.queryByLabelText(/maximum video quality/i)).toBeNull()
-    expect(optionValues(screen.getByLabelText(/audio quality/i))).toEqual(['320', '192', '128'])
+    expect(optionValues(screen.getByLabelText('Audio quality'))).toEqual(['320', '192', '128'])
     expect(optionValues(screen.getByLabelText(/output bitrate/i))).toEqual(['320', '256', '192', '128', '96'])
   })
 
