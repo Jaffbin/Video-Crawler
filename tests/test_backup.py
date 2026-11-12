@@ -233,3 +233,66 @@ def test_restored_desktop_preferences_refresh_the_running_controller(server, mon
     review = call(server, "/api/backup/preview", body)[1]
     assert call(server, "/api/backup/restore", {**body, "review_token": review["review_token"]})[0] == 200
     assert desktop.close_behavior == "background" and not desktop.notifications_enabled
+
+
+def auto_rule(name="Music from Bili", collections=("a" * 32,)):
+    return {"name": name, "enabled": True, "conditions": {"source": "bilibili.com", "kind": "audio"},
+            "actions": {"tags": ["B站"], "collections": list(collections), "favorite": True}}
+
+
+def test_auto_rules_survive_export_and_restore_into_an_empty_library():
+    music = webui.LIBRARY.change_collection("create", "Music")
+    key = webui.LIBRARY.change_auto_rule("create", rule=auto_rule(collections=[music]))
+    exported = service().export({})
+    assert exported["library"]["auto_rules"][key]["actions"]["collections"] == [music]
+    webui.LIBRARY.change_auto_rule("delete", key)
+    webui.LIBRARY.change_collection("delete", collection_id=music)
+    review = service().preview(exported, {})
+    assert review["counts"]["auto_rules"] == 1 and review["counts"]["collections"] == 1
+    service().restore(exported, {}, review["review_token"])
+    restored = webui.LIBRARY.auto_rules()
+    assert [rule["name"] for rule in restored] == ["Music from Bili"]
+    assert restored[0]["actions"]["collections"] == [music] and webui.LIBRARY.collections()[0]["name"] == "Music"
+
+
+def test_restored_rules_follow_collections_merged_by_name():
+    current = webui.LIBRARY.change_collection("create", "music")  # same name, different identifier
+    incoming = source()
+    incoming["library"]["auto_rules"] = {"b" * 32: auto_rule()}
+    review = service().preview(incoming, {})
+    assert review["counts"]["collections"] == 0 and review["counts"]["auto_rules"] == 1
+    service().restore(incoming, {}, review["review_token"])
+    assert webui.LIBRARY.auto_rules()[0]["actions"]["collections"] == [current]
+
+
+def test_existing_rules_win_and_differences_count_as_conflicts():
+    key = webui.LIBRARY.change_auto_rule("create", rule={**auto_rule(collections=[]), "actions": {"tags": ["mine"]}})
+    incoming = source()
+    incoming["library"]["auto_rules"] = {key: auto_rule(name="Renamed"), "c" * 32: auto_rule(name="MUSIC FROM BILI"),
+                                         "d" * 32: auto_rule(name="New one")}
+    review = service().preview(incoming, {})
+    assert review["counts"]["auto_rules"] == 1 and review["counts"]["conflicts"] >= 2
+    service().restore(incoming, {}, review["review_token"])
+    rules = {rule["name"]: rule for rule in webui.LIBRARY.auto_rules()}
+    assert set(rules) == {"Music from Bili", "New one"} and rules["Music from Bili"]["actions"] == {"tags": ["mine"]}
+
+
+def test_older_backups_without_auto_rules_still_restore():
+    assert document(source())["library"]["auto_rules"] == {}
+    review = service().preview(source(), {})
+    assert review["counts"]["auto_rules"] == 0
+
+
+@pytest.mark.parametrize("value", [
+    [],
+    {"bad": auto_rule()},
+    {"b" * 32: auto_rule(collections=["e" * 32])},  # collection not in the backup
+    {"b" * 32: {**auto_rule(), "conditions": {}}},
+    {"b" * 32: auto_rule(), "c" * 32: auto_rule(name="music from bili")},
+    {f"{index:032x}": auto_rule(name=str(index)) for index in range(51)},
+])
+def test_invalid_auto_rule_backups_are_rejected(value):
+    backup = source()
+    backup["library"]["auto_rules"] = value
+    with pytest.raises(ValueError):
+        document(backup)

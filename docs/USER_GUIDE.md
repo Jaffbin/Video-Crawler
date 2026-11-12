@@ -415,8 +415,12 @@ rename or delete files. They apply to completed downloads when they are saved to
 to imported files, files already in the Library or processing-incomplete downloads. The task log
 shows which rules applied. Use **Turn off** to pause a rule without deleting it. A file keeps at
 most 20 tags. Deleting a manual collection removes it from rules, and a rule left with nothing to
-do is removed. Up to 50 rules can be saved per library. Auto rules are not yet included in
-backups.
+do is removed. Up to 50 rules can be saved per library.
+
+Auto rules are included in settings/library backups. On restore, a rule follows its collections
+even when they are merged into an existing collection of the same name. An existing rule with the
+same ID or name keeps its current definition, and the restore preview shows how many rules will be
+added. Earlier app versions ignore this optional backup field.
 
 Files whose transfer finished but whose postprocessing did not finish are labeled
 **Processing incomplete** in Queue and Library. This includes unmerged video/audio streams and

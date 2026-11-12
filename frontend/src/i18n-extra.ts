@@ -368,6 +368,11 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Save smart collection': ['保存智能合集', '儲存智慧合集', 'スマートコレクションを保存'],
   'Create smart collection': ['创建智能合集', '建立智慧合集', 'スマートコレクションを作成'],
   'Clear rules': ['清空规则', '清除規則', '条件をクリア'],
+  '{count} auto rules will be added.': [
+    '将添加 {count} 条自动规则。',
+    '將新增 {count} 條自動規則。',
+    '{count} 件の自動ルールを追加します。',
+  ],
   '{count} smart collections will be added.': [
     '将新增 {count} 个智能合集。',
     '將新增 {count} 個智慧合集。',

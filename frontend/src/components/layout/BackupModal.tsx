@@ -173,6 +173,9 @@ export function BackupModal({
                 {t('{count} smart collections will be added.', { count: review.counts.smart_collections })}
               </p>
             )}
+            {!!review.counts.auto_rules && (
+              <p>{t('{count} auto rules will be added.', { count: review.counts.auto_rules })}</p>
+            )}
             <p>
               {t('{count} conflicting values will keep the current value.', {
                 count: review.counts.conflicts,

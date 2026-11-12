@@ -14,6 +14,7 @@ import tempfile
 import uuid
 
 from grab_storage import JsonStore
+import grab_auto_rules
 from grab_library import SMART_COLLECTION_LIMIT, smart_collection_records
 
 BACKUP_MAX_BYTES = 16 * 1024**2
@@ -148,6 +149,7 @@ def document(value):
             raise ValueError("Invalid collection identifier.")
         collections[key] = checked_text(name, 80, empty=False).strip()
     smart = smart_collection_records(library.get("smart_collections", {}), strict=True)
+    rules = auto_rule_records(library.get("auto_rules", {}), collections)
     files, paths = [], set()
     for item in library["files"]:
         if not isinstance(item, dict):
@@ -161,7 +163,23 @@ def document(value):
             raise ValueError("A media entry refers to an unknown collection.")
         files.append({"path": path, "size": item["size"], "annotations": info})
     return {"format": "video-grabber-backup", "version": 1, "preferences": browser, "desktop": desktop,
-            "library": {"files": files, "collections": collections, "smart_collections": smart}}
+            "library": {"files": files, "collections": collections, "smart_collections": smart, "auto_rules": rules}}
+
+
+def auto_rule_records(value, collections):
+    """Strictly validate backed-up auto rules; their collections must be in the same backup."""
+    if not isinstance(value, dict) or len(value) > grab_auto_rules.RULE_LIMIT:
+        raise ValueError(f"Use up to {grab_auto_rules.RULE_LIMIT} auto rules.")
+    result, names = {}, set()
+    for key, item in value.items():
+        if not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{32}", key):
+            raise ValueError("Invalid auto rule identifier.")
+        record = grab_auto_rules.check_rule(item, collections)
+        if record["name"].casefold() in names:
+            raise ValueError("An auto rule with that name already exists.")
+        names.add(record["name"].casefold())
+        result[key] = record
+    return result
 
 
 def encoded(value):
@@ -244,7 +262,8 @@ class BackupService:
             result = document({"format": "video-grabber-backup", "version": 1, "preferences": browser,
                                "desktop": {**(desktop_defaults or {}), **desktop_preferences(desktop)},
                                "library": {"files": files, "collections": data["collections"],
-                                           "smart_collections": data["smart_collections"]}})
+                                           "smart_collections": data["smart_collections"],
+                                           "auto_rules": data["auto_rules"]}})
             result["created_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             if len(encoded(result)) > BACKUP_MAX_BYTES:
                 raise ValueError("The backup exceeds the 16 MiB limit.")
@@ -258,7 +277,8 @@ class BackupService:
         if not isinstance(saved_desktop, dict):
             raise ValueError("Current desktop settings are unreadable.")
         desktop = {**source["desktop"], **saved_desktop}
-        counts = {"files": 0, "collections": 0, "smart_collections": 0, "presets": 0, "settings": 0, "conflicts": 0}
+        counts = {"files": 0, "collections": 0, "smart_collections": 0, "auto_rules": 0, "presets": 0, "settings": 0,
+                  "conflicts": 0}
         for key in ("download", "theme", "locale"):
             if key not in source["preferences"]:
                 continue
@@ -312,6 +332,23 @@ class BackupService:
                 counts["smart_collections"] += 1
         if len(data["smart_collections"]) > SMART_COLLECTION_LIMIT:
             raise ValueError("Use up to 100 smart collections.")
+        for key, incoming in source["library"]["auto_rules"].items():
+            # Point the rule at this library's collections, which may have been merged by name.
+            actions = dict(incoming["actions"])
+            if "collections" in actions:
+                actions["collections"] = list(dict.fromkeys(mapping[entry] for entry in actions["collections"]))
+            incoming = {**incoming, "actions": actions}
+            match = data["auto_rules"].get(key)
+            if match is None:
+                match = next((item for item in data["auto_rules"].values()
+                              if item["name"].casefold() == incoming["name"].casefold()), None)
+            if match is not None:
+                counts["conflicts"] += match != incoming
+            else:
+                data["auto_rules"][key] = incoming
+                counts["auto_rules"] += 1
+        if len(data["auto_rules"]) > grab_auto_rules.RULE_LIMIT:
+            raise ValueError(f"Merging would exceed the {grab_auto_rules.RULE_LIMIT} auto rule limit.")
         skipped = []
         for item in source["library"]["files"]:
             try:

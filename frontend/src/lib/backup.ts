@@ -12,6 +12,7 @@ export interface BackupReview {
     files: number
     collections: number
     smart_collections?: number
+    auto_rules?: number
     presets: number
     settings: number
     conflicts: number
