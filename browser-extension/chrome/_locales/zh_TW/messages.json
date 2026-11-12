@@ -61,6 +61,7 @@
   "invalidConnection": { "message": "僅能連線至 127.0.0.1 上的本機軟體。" },
   "invalidFormat": { "message": "請選擇影片、MP3 或來源音訊。" },
   "invalidRequest": { "message": "請重新開啟擴充功能再試。" },
+  "extensionAccessOff": { "message": "請在 Video Grabber 的「設定與說明」中開啟「允許 Chrome 擴充功能連線」，然後按一下重新連線。" },
   "notOurApp": { "message": "此位址沒有回傳有效的 Video Grabber 軟體。" },
   "appUnavailable": {
     "message": "無法連線，請開啟 Video Grabber 後點擊「重新連線」。"

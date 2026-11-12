@@ -61,6 +61,7 @@
   "invalidConnection": { "message": "仅能连接 127.0.0.1 上的本机软件。" },
   "invalidFormat": { "message": "请选择视频、MP3 或来源音频。" },
   "invalidRequest": { "message": "请重新打开扩展再试。" },
+  "extensionAccessOff": { "message": "请在 Video Grabber 的“设置和帮助”中开启“允许 Chrome 扩展连接”，然后点击重新连接。" },
   "notOurApp": { "message": "此地址没有返回有效的 Video Grabber 软件。" },
   "appUnavailable": {
     "message": "无法连接，请打开 Video Grabber 后点击“重新连接”。"

@@ -65,6 +65,7 @@
   },
   "invalidFormat": { "message": "動画・MP3・元の音声を選択してください。" },
   "invalidRequest": { "message": "拡張機能を開き直して再試行してください。" },
+  "extensionAccessOff": { "message": "Video Grabber の「設定とヘルプ」で「Chrome 拡張機能の接続を許可する」をオンにし、再接続をクリックしてください。" },
   "notOurApp": {
     "message": "このアドレスから有効な Video Grabber が応答しませんでした。"
   },

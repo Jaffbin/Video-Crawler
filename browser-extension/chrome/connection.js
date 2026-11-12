@@ -77,7 +77,15 @@ async function request(fetcher, url, init = {}, timeout = 2000) {
 
 export async function connect(origin, fetcher = fetch) {
   origin = checkedOrigin(origin)
-  const page = await request(fetcher, origin + '/')
+  // The app only hands its start page to this extension when "Allow the Chrome extension to connect" is on.
+  const page = await request(fetcher, origin + '/', {
+    headers: { 'X-Grab-Client': 'extension' },
+  })
+  if (page.status === 403) {
+    const body = await page.json().catch(() => null)
+    if (body?.error === 'extension_access_off')
+      throw new AppError('extensionAccessOff')
+  }
   if (!page.ok) throw new AppError('notOurApp')
   const token = tokenFromPage(await page.text())
   const response = await request(fetcher, origin + '/api/state?rev=0', {

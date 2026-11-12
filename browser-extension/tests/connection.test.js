@@ -362,3 +362,22 @@ test('a restarted worker checks the popup destination before posting and rejects
     globalThis.fetch = previousFetch
   }
 })
+
+test('identifies itself to the app and explains when extension access is switched off', async () => {
+  const calls = []
+  await connect(origin, async (url, init) => {
+    calls.push({ url, init })
+    return calls.length === 1 ? page() : state()
+  })
+  assert.equal(calls[0].init.headers['X-Grab-Client'], 'extension')
+  await assert.rejects(
+    connect(origin, async () =>
+      Response.json({ error: 'extension_access_off' }, { status: 403 }),
+    ),
+    (error) => error.code === 'extensionAccessOff',
+  )
+  await assert.rejects(
+    connect(origin, async () => new Response('nope', { status: 403 })),
+    (error) => error.code === 'notOurApp',
+  )
+})

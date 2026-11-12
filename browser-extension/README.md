@@ -6,7 +6,9 @@ The downloader's existing supported-site and login requirements still apply.
 
 ## Install this development version
 
-1. Start Video Grabber and keep it running.
+1. Start Video Grabber, open **Settings and help**, turn on **Allow the Chrome extension to connect**,
+   and keep the app running. The setting is off by default so other programs on the computer
+   cannot connect the same way.
 2. In Chrome, open `chrome://extensions` and enable **Developer mode**.
 3. Click **Load unpacked** and select this repository's `browser-extension/chrome` folder.
    Alternatively extract `artifacts/video-grabber-chrome-extension.zip` and select the extracted folder.

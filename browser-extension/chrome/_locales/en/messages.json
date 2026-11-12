@@ -65,6 +65,7 @@
   },
   "invalidFormat": { "message": "Choose video, MP3 or source audio." },
   "invalidRequest": { "message": "Reopen the extension and try again." },
+  "extensionAccessOff": { "message": "Turn on \"Allow the Chrome extension to connect\" in Video Grabber under Settings and help, then click Reconnect." },
   "notOurApp": {
     "message": "This address did not return a valid Video Grabber app."
   },
