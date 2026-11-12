@@ -9,6 +9,10 @@ Usage
 Notes
   * Listens on 127.0.0.1 only. Requests need a random token created at startup and the Host
     header is checked, so other web pages cannot drive this program through your browser.
+  * The start page that carries the token is only served to our own window or browser tab (they open
+    the launch link printed at startup, which sets an HttpOnly session cookie), and to the Chrome
+    extension when "Allow the Chrome extension to connect" is switched on. Other programs on this
+    computer get an empty "locked" page.
   * Needs grab.py in the same folder, plus:  pip install -U "yt-dlp[default]"  and ffmpeg.
     YouTube also needs a JavaScript runtime (Deno). Open "Diagnostics" in the page to check.
   * Uploaded cookies.txt is stored outside the download folder (see "Diagnostics" for the path)
@@ -18,12 +22,11 @@ Notes
 """
 from __future__ import annotations
 
-import contextlib
 import hmac
+import http.cookies
 import importlib.metadata
 import importlib.util
 import json
-import logging
 import mimetypes
 import os
 import queue
@@ -44,20 +47,39 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import grab  # noqa: E402
 from grab_config import parse_web_config  # noqa: E402
-from grab_models import BACKFILL_MAX, Job, Subscription, http_url, normalize_subscription_filters, output_complete  # noqa: E402
+from grab_models import BACKFILL_MAX, Job, Subscription, http_url, normalize_subscription_filters, output_complete  # noqa: E402,F401
 from grab_state import JobManager, SubscriptionManager  # noqa: E402
 from grab_storage import JsonStore  # noqa: E402
-from grab_library import IMPORT_MAX_BYTES, MediaLibrary  # noqa: E402
+from grab_library import IMPORT_MAX_BYTES, MediaLibrary  # noqa: E402,F401  (IMPORT_MAX_BYTES is read by the library routes)
 from grab_organizer import LibraryOrganizer  # noqa: E402
-from grab_backup import BACKUP_MAX_BYTES, BackupService  # noqa: E402
+from grab_backup import BACKUP_MAX_BYTES, BackupService  # noqa: E402,F401  (BackupService is used by the library routes)
 from grab_repair import repair, repair_options  # noqa: E402
-from grab_download import optional_video_cover_downloader, tracking_downloader, transient_network_error  # noqa: E402
+from grab_archive import seed_archive  # noqa: E402
+from grab_errors import error_details, fmt_eta, fmt_speed, friendly_error, strip_ansi  # noqa: E402
+import grab_cookies  # noqa: E402
+import webui_routes_library  # noqa: E402
+import webui_routes_jobs  # noqa: E402
+import webui_routes_subscriptions  # noqa: E402
+import webui_routes_system  # noqa: E402
+from grab_subscriptions import (  # noqa: E402
+    filter_subscription_entries, normalize_flat_entries, split_backfill, subscription_filter_reason,
+)
+from grab_cookies import parse_cookies  # noqa: E402,F401
+from grab_download import optional_video_cover_downloader, tracking_downloader  # noqa: E402
 from grab_images import IMAGE_SUFFIXES, download_image, image_title, probe_image, thumbnail_downloader  # noqa: E402
 import yt_dlp  # noqa: E402
 from yt_dlp.utils import DownloadCancelled, DownloadError  # noqa: E402
 
 ROOT = Path("downloads").resolve()
 TOKEN = secrets.token_urlsafe(24)
+# The page that carries TOKEN is only handed to clients that prove they were launched by this app:
+# either the launch link (?n=...) given to our own window or browser tab, or the session cookie that
+# link sets. A restart keeps the session secret so an already open tab can reload.
+LAUNCH_SECRET = secrets.token_urlsafe(24)
+_inherited_session = os.environ.pop("GRAB_SESSION_SECRET", "")
+SESSION_SECRET = (_inherited_session if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", _inherited_session)
+                  else secrets.token_urlsafe(24))
+SESSION_COOKIE = "grab_session"
 BROWSERS = {"chrome", "edge", "firefox", "brave", "chromium", "opera", "vivaldi", "safari"}
 # The React app, built by `npm run build` in frontend/ (see frontend/README.md). Shipped pre-built,
 # so running the backend never requires Node. Falls back to the legacy inline page if missing.
@@ -71,7 +93,6 @@ FOLDER_PICK_LOCK = threading.Lock()
 SETTINGS_LOCK = threading.Lock()
 MEDIA_SUFFIX = {".mp4", ".webm", ".mkv", ".mov"} | grab.AUDIO_SUFFIXES | IMAGE_SUFFIXES
 LIBRARY = MediaLibrary(lambda: ROOT, MEDIA_SUFFIX)
-ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 FILES_REV = 0
 PORT = 0
@@ -97,6 +118,11 @@ PYPI_CACHE: dict = {"ts": 0.0, "latest": None}
 # Settings that must not live in the (possibly synced or shared) download folder, e.g. cookies.txt
 CONFIG_DIR = Path(os.environ.get("GRAB_CONFIG_DIR") or (Path(os.environ.get("APPDATA") or (Path.home() / ".config")) / "grab-webui"))
 DOCTOR_CACHE: dict = {"ts": 0.0, "data": None}
+LOCKED_PAGE = (b"<!doctype html><meta charset=utf-8><title>Video Grabber</title>"
+               b'<body style="font:16px system-ui;max-width:34rem;margin:4rem auto;padding:0 1rem">'
+               b"<h1>Video Grabber is running</h1>"
+               b"<p>This page can only be opened by the app itself. Use the Video Grabber window, "
+               b"or the link printed in the terminal where it was started.</p>")
 COOKIES_MAX_BYTES = 3_000_000
 BODY_MAX_BYTES = 1_000_000
 
@@ -130,93 +156,6 @@ def bump_rev() -> None:
 
 
 # ───────────────────────── Tools ─────────────────────────
-def strip_ansi(s: str) -> str:
-    return ANSI.sub("", s or "")
-
-
-def fmt_speed(v) -> str:
-    if not v:
-        return ""
-    for unit in ("B/s", "KB/s", "MB/s", "GB/s"):
-        if v < 1024:
-            return f"{v:.0f} {unit}" if unit == "B/s" else f"{v:.1f} {unit}"
-        v /= 1024
-    return f"{v:.1f} TB/s"
-
-
-def fmt_eta(s) -> str:
-    if s is None:
-        return ""
-    s = int(s)
-    h, rem = divmod(s, 3600)
-    m, sec = divmod(rem, 60)
-    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
-
-
-def error_details(msg: str) -> dict[str, str]:
-    """Classify a downloader failure without discarding its actionable cause."""
-    m = re.sub(r"^ERROR:\s*", "", strip_ansi(msg or "").strip())
-    # yt-dlp appends "; please report this issue ... Confirm you are on the latest version" to unexpected errors.
-    # That boilerplate must not be mistaken for the real cause ("confirm you" once triggered the login message).
-    m = re.split(r";\s*please report this issue", m, maxsplit=1)[0].strip()
-    low = m.lower()
-    if "winerror 4551" in low:
-        return {"kind": "app_control", "message": "Windows blocked a media component.",
-                "hint": "View technical details to identify the blocked file. Automatic setup cannot override Windows security."}
-    if "unsupported url" in low:
-        return {"kind": "unsupported", "message": "Cannot recognize this page or find a media URL.",
-                "hint": "Enable page rendering in Advanced Settings. If that still fails, paste the m3u8 or mp4 URL from the browser Network panel."}
-    if any(k in low for k in ("javascript runtime", "challenge solving failed", "signature solving failed")):
-        return {"kind": "javascript", "message": "The site challenge could not be solved.",
-                "hint": "Open Diagnostics and install Deno plus the recommended yt-dlp components."}
-    if "cookie" in low and any(k in low for k in ("could not copy", "cookie database", "decrypt", "locked")):
-        return {"kind": "cookies_locked", "message": "Could not read the browser's cookies.",
-                "hint": "Close the browser completely and retry, or upload a cookies.txt file in Advanced Settings."}
-    if "cookies are no longer valid" in low or "likely been rotated" in low:
-        return {"kind": "cookies_expired", "message": "The saved cookies were rotated or expired.",
-                "hint": "Export a fresh cookies.txt from a private window and upload it in Advanced Settings."}
-    if any(k in low for k in ("sign in", "log in", "login", "not a bot", "use --cookies", "cookies-from-browser")):
-        return {"kind": "login", "message": "This content requires login or verification.",
-                "hint": "Upload a cookies.txt file or select a browser in Advanced Settings, then retry."}
-    if re.search(r"winerror 32\b", low) or "used by another process" in low or "sharing violation" in low:
-        return {"kind": "file_locked", "message": "A player or another app is using this file.",
-                "hint": "Close the player, then retry. Open the download folder to find the file."}
-    if "permission denied" in low or re.search(r"winerror 5\b", low) or "access is denied" in low:
-        return {"kind": "file_permission", "message": "The app cannot save to this folder.",
-                "hint": "Check the download folder is writable and close any player using the file, then retry."}
-    if any(k in low for k in ("no space left", "disk full", "errno 28")):
-        return {"kind": "disk_full", "message": "The download drive is out of free space.",
-                "hint": "Free some space or choose another download folder, then retry."}
-    if "ffmpeg" in low or "ffprobe" in low:
-        return {"kind": "ffmpeg", "message": "ffmpeg is missing or could not process the media.",
-                "hint": "Open Diagnostics and verify the selected ffmpeg can run; check its path and application control policy, then restart the app."}
-    if any(k in low for k in ("getaddrinfo failed", "name or service not known", "nodename nor servname",
-                              "temporary failure in name resolution", "no address associated")):
-        return {"kind": "dns", "message": "Cannot find that site's address.",
-                "hint": "Check the link and DNS settings, then open Diagnostics > Test network."}
-    if "certificate" in low and "verify" in low:
-        return {"kind": "certificate", "message": "The site's SSL certificate could not be verified.",
-                "hint": "Check the system clock and any antivirus, VPN, or proxy that inspects HTTPS."}
-    if transient_network_error(m) or any(k in low for k in ("timed out", "connection refused", "failed to establish a new connection", "connection reset",
-                              "network is unreachable", "proxyerror", "unable to connect to proxy")):
-        return {"kind": "network", "message": "Cannot reach the site.",
-                "hint": "Check the network, VPN, DNS, or proxy, then open Diagnostics > Test network."}
-    if "http error 403" in low or "http error 401" in low:
-        if importlib.util.find_spec("curl_cffi") is None:
-            return {"kind": "impersonation_missing", "message": "The server denied access and browser impersonation is unavailable.",
-                    "hint": "Open Diagnostics, install the recommended components, then retry."}
-        return {"kind": "forbidden", "message": "The server denied access.",
-                "hint": "Add the source page as Referer or provide cookies in Advanced Settings, then retry."}
-    if "http error 404" in low:
-        return {"kind": "not_found", "message": "The link was not found or has expired (404).",
-                "hint": "Open the original page and copy a fresh link."}
-    return {"kind": "unknown", "message": m[:300] or "Download failed.",
-            "hint": "Expand the log for the technical details, update yt-dlp, then retry."}
-
-
-def friendly_error(msg: str) -> str:
-    details = error_details(msg)
-    return f"{details['message']} {details['hint']}".strip()
 
 
 def set_job_error(job: Job, msg: str) -> None:
@@ -249,7 +188,9 @@ def make_args(o: dict):
     a.no_playlist = bool(o.get("no_playlist"))
     items = str(o.get("items") or "").strip()
     a.items = items if re.fullmatch(r"[\d,\-:]+", items) else None
-    a.archive = str(ROOT / ".archive.txt") if o.get("archive") else None
+    # Video and audio keep separate skip lists, so having a video as MP3 never hides it from an MP4 request.
+    a.archive = (str(ROOT / (".archive-audio.txt" if a.mode in ("mp3", "original") else ".archive.txt"))
+                 if o.get("archive") else None)
     br = str(o.get("cookies_from_browser") or "")
     a.cookies_from_browser = br if br in BROWSERS else None
     # An uploaded cookies.txt wins over reading a browser
@@ -354,6 +295,13 @@ def downloaded_matches(urls: list[str], options: dict) -> list[dict]:
 
 
 # ───────────────────────── Jobs ─────────────────────────
+def _library_file_is_complete(relative: str) -> bool:
+    try:
+        return LIBRARY.media_path(relative).stat().st_size > 0
+    except (OSError, ValueError):
+        return False
+
+
 def run_job(job: Job) -> None:
     if "_repair_path" in job.options:
         return run_repair_job(job)
@@ -376,6 +324,15 @@ def run_job(job: Job) -> None:
             job.status, job.stage, job.percent, job.speed, job.eta = "error", "Failed", 0.0, "", ""
             set_job_error(job, message)
             return
+
+    if args.archive and args.mode in ("mp4", "mp3", "original") and not copy_download:
+        # yt-dlp only skips what it recorded itself, so tell it about files the Library already has.
+        try:
+            seed_archive(Path(args.archive), library_records(),
+                         kind="video" if args.mode == "mp4" else "audio",
+                         audio_suffixes=grab.AUDIO_SUFFIXES, is_complete_file=_library_file_is_complete)
+        except OSError as error:
+            job.log.append(f"Warning: Could not prepare the skip list: {error}")
 
     def log(msg: str) -> None:
         for line in strip_ansi(str(msg)).splitlines():
@@ -1225,7 +1182,8 @@ def restart_self() -> None:
     """Restart this program with the same arguments (required to load the new version after updating yt-dlp)."""
     argv = [sys.executable, str(Path(__file__).resolve()), "--dir", str(PENDING_ROOT or ROOT), "--port", str(PORT),
             "--workers", str(WORKERS), "--ui", "window" if WINDOW_MODE else "none"]
-    env = dict(os.environ, GRAB_WEBUI_RESTART="1", GRAB_RESTART_WINDOW="1" if WINDOW_MODE else "0")
+    env = dict(os.environ, GRAB_WEBUI_RESTART="1", GRAB_RESTART_WINDOW="1" if WINDOW_MODE else "0",
+               GRAB_SESSION_SECRET=SESSION_SECRET)
     if sys.platform.startswith("win"):
         subprocess.Popen(argv, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)  # type: ignore[attr-defined]
         if NATIVE_DESKTOP is not None:
@@ -1239,107 +1197,46 @@ def cookies_path() -> Path:
     return CONFIG_DIR / "cookies.txt"
 
 
-def parse_cookies(text: str) -> dict:
-    """Validate Netscape-format cookies.txt text. Raises ValueError with a readable reason.
-
-    The returned summary never contains cookie values; "text" is the normalised file content to store.
-    """
-    if text.lstrip().startswith(("{", "[")):
-        raise ValueError("That looks like a JSON export. Export the cookies in Netscape 'cookies.txt' format instead.")
-    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    names: dict[str, set[str]] = {}
-    count = expired = bad = 0
-    now = time.time()
-    for raw in lines:
-        if not raw.strip() or (raw.startswith("#") and not raw.startswith("#HttpOnly_")):
-            continue
-        parts = raw.split("\t")
-        try:
-            if len(parts) != 7:
-                raise ValueError
-            exp = int(parts[4] or 0)
-        except ValueError:
-            bad += 1
-            continue
-        domain = parts[0].removeprefix("#HttpOnly_").lstrip(".").lower()
-        names.setdefault(domain, set()).add(parts[5])
-        count += 1
-        if 0 < exp < now:
-            expired += 1
-    if not count:
-        raise ValueError("No valid cookie lines found. Export the cookies as a Netscape-format cookies.txt file "
-                         "(seven tab-separated columns per line).")
-
-    def names_for(*suffixes: str) -> set[str]:
-        return {n for d, ns in names.items() if any(d == x or d.endswith("." + x) for x in suffixes) for n in ns}
-
-    yt, google, bili = names_for("youtube.com"), names_for("youtube.com", "google.com"), names_for("bilibili.com")
-    header_ok = bool(lines) and re.search(r"#( Netscape)? HTTP Cookie File", lines[0]) is not None
-    body = lines if header_ok else ["# Netscape HTTP Cookie File"] + lines
-    return {
-        "cookies": count, "expired": expired, "bad_lines": bad, "domains": sorted(names),
-        "has_youtube": bool(yt), "youtube_login": "LOGIN_INFO" in yt and bool(
-            google & {"SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID", "__Secure-3PSID"}),
-        "has_bilibili": bool(bili), "bilibili_login": "SESSDATA" in bili,
-        "text": "\n".join(body).rstrip("\n") + "\n",
-    }
-
-
 def cookies_status() -> dict:
-    path = cookies_path()
-    if not path.is_file():
-        return {"present": False}
-    try:
-        info = parse_cookies(path.read_text(encoding="utf-8", errors="replace"))
-        updated = path.stat().st_mtime
-    except (OSError, ValueError):
-        return {"present": False}
-    info.pop("text", None)
-    domains = info.pop("domains")
-    return {"present": True, "updated": updated, "domain_count": len(domains), "sample": domains[:6], **info}
+    return grab_cookies.cookies_status(cookies_path())
 
 
 def save_cookies(text: str) -> dict:
-    info = parse_cookies(text)
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    path = cookies_path()
-    tmp = path.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(info["text"])
-    with contextlib.suppress(OSError):
-        os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    result = grab_cookies.save_cookies(text, cookies_path())
     DOCTOR_CACHE["ts"] = 0.0
-    return cookies_status()
+    return result
 
 
 def delete_cookies() -> None:
-    with contextlib.suppress(OSError):
-        cookies_path().unlink()
+    grab_cookies.delete_cookies(cookies_path())
     DOCTOR_CACHE["ts"] = 0.0
 
 
-@contextlib.contextmanager
 def cookie_copy(args):
-    """Give every yt-dlp run its own copy of the cookies file.
+    """A context manager giving this yt-dlp run its own copy of the cookies file (see grab_cookies)."""
+    return grab_cookies.cookie_copy(args, CONFIG_DIR)
 
-    yt-dlp writes cookies back to the file when it closes; separate copies stop parallel jobs from
-    clobbering each other and keep the uploaded file exactly as the user exported it.
-    """
-    if not getattr(args, "cookies", None):
-        yield None
-        return
-    tmp = None
-    try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix="run-", suffix=".txt", dir=CONFIG_DIR)
-        os.close(fd)
-        shutil.copyfile(args.cookies, tmp)
-        yield tmp
-    finally:
-        if tmp:
-            with contextlib.suppress(OSError):
-                os.remove(tmp)
+
+# ───────────────────────── Access settings ─────────────────────────
+def launch_url(port: int) -> str:
+    """The address our own window or browser tab opens; it proves the client was started by this app."""
+    return f"http://127.0.0.1:{port}/?n={LAUNCH_SECRET}"
+
+
+def _access_store() -> JsonStore:
+    return JsonStore(lambda: CONFIG_DIR / "access.json", SETTINGS_LOCK)
+
+
+def extension_access_enabled() -> bool:
+    data = _access_store().load({})
+    return isinstance(data, dict) and data.get("extension") is True
+
+
+def set_extension_access(enabled: bool) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    store = _access_store()
+    data = store.load({})
+    store.save({**(data if isinstance(data, dict) else {}), "extension": enabled})
 
 
 # ───────────────────────── Diagnostics ─────────────────────────
@@ -1456,62 +1353,6 @@ def list_flat_entries(url: str, args) -> tuple[str, list[dict]]:
     return str(info.get("title") or ""), normalize_flat_entries(info, url)
 
 
-def normalize_flat_entries(info: dict, fallback_url: str) -> list[dict]:
-    """Keep only entries with a usable web URL; flat extractors sometimes put a bare ID in ``url``."""
-    is_playlist = info.get("_type") == "playlist"
-    entries = list(info.get("entries") or []) if is_playlist else [info]
-    normalized = []
-    for entry in entries:
-        if not entry or not entry.get("id"):
-            continue
-        entry_url = http_url(entry.get("webpage_url")) or http_url(entry.get("url"))
-        if not entry_url and not is_playlist:
-            entry_url = fallback_url
-        if entry_url:
-            try:
-                duration = max(0, int(float(entry.get("duration")))) if entry.get("duration") is not None else None
-            except (TypeError, ValueError):
-                duration = None
-            candidate_urls = " ".join(str(entry.get(key) or "") for key in ("url", "webpage_url", "original_url"))
-            live_status = str(entry.get("live_status") or "").lower()
-            normalized.append({
-                "id": str(entry["id"]), "url": entry_url, "title": entry.get("title") or "",
-                "duration": duration,
-                "is_live": bool(entry.get("is_live")) or live_status in {"is_live", "is_upcoming"},
-                "is_short": "/shorts/" in candidate_urls.lower(),
-            })
-    return normalized
-
-
-def subscription_filter_reason(entry: dict, filters: dict) -> str | None:
-    """Return a stable reason code for a rejected entry, or None when it matches."""
-    included = [word.casefold() for word in filters["include_keywords"]]
-    excluded = [word.casefold() for word in filters["exclude_keywords"]]
-    title = str(entry.get("title") or "").casefold()
-    duration = entry.get("duration")
-    if included and not any(word in title for word in included):
-        return "include_keywords"
-    if any(word in title for word in excluded):
-        return "exclude_keywords"
-    if filters["exclude_live"] and entry.get("is_live"):
-        return "live"
-    if filters["exclude_shorts"] and entry.get("is_short"):
-        return "shorts"
-    if filters["min_duration"] and duration is not None and duration < filters["min_duration"]:
-        return "min_duration"
-    if filters["max_duration"] and duration is not None and duration > filters["max_duration"]:
-        return "max_duration"
-    return None
-
-
-def filter_subscription_entries(entries: list[dict], filters: dict) -> tuple[list[dict], list[dict]]:
-    filters = normalize_subscription_filters(filters)
-    accepted, skipped = [], []
-    for entry in entries:
-        (skipped if subscription_filter_reason(entry, filters) else accepted).append(entry)
-    return accepted, skipped
-
-
 def preview_subscription(sub: Subscription, filters: dict) -> dict:
     """Inspect candidates without changing seen IDs or queuing work."""
     title, entries = list_flat_entries(sub.url, make_args(sub.options))
@@ -1536,13 +1377,6 @@ def preview_subscription(sub: Subscription, filters: dict) -> dict:
             "eligible": entry["id"] in candidate_ids,
         } for entry in displayed],
     }
-
-
-def split_backfill(entries: list[dict], count: int) -> tuple[list[dict], list[dict]]:
-    """(entries to queue now, the rest) - assumes newest-first order, which is what channel/playlist
-    listings normally are; if a site instead lists oldest-first, backfill still just picks the first
-    `count` entries returned rather than the true most-recent ones."""
-    return entries[:count], entries[count:]
 
 
 def check_subscription(sub: "Subscription") -> None:
@@ -1725,8 +1559,28 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _session_cookie_ok(self) -> bool:
+        try:
+            jar = http.cookies.SimpleCookie(self.headers.get("Cookie") or "")
+        except http.cookies.CookieError:
+            return False
+        morsel = jar.get(SESSION_COOKIE)
+        return morsel is not None and hmac.compare_digest(morsel.value.encode(), SESSION_SECRET.encode())
+
+    def _root_access(self, query: dict) -> str | None:
+        nonce = (query.get("n") or [""])[0]
+        if nonce and hmac.compare_digest(nonce.encode(), LAUNCH_SECRET.encode()):
+            return "launch"
+        if self._session_cookie_ok():
+            return "session"
+        if self.headers.get("X-Grab-Client") == "extension" and extension_access_enabled():
+            return "extension"
+        return None
+
     def _authed(self, query: dict) -> bool:
-        tok = self.headers.get("X-Token") or (query.get("t") or [""])[0]
+        tok = self.headers.get("X-Token") or ""
+        if not tok and self.command == "GET":  # A token in a URL is read-only legacy access.
+            tok = (query.get("t") or [""])[0]
         if not hmac.compare_digest(tok.encode(), TOKEN.encode()):
             self._discard_rejected_body()
             self._json({"error": "Unauthorized, please refresh the page"}, 401)
@@ -1734,82 +1588,36 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     # —— Routing ——
-    def _handle_root_page(self):
+    def _handle_root_page(self, query: dict):
+        access = self._root_access(query)
+        if access is None:
+            if self.headers.get("X-Grab-Client") == "extension":
+                return self._json({"error": "extension_access_off"}, 403)
+            return self._send(403, LOCKED_PAGE, "text/html; charset=utf-8", {"Referrer-Policy": "no-referrer"})
+        extra = {"Referrer-Policy": "no-referrer"}
+        if access == "launch":
+            extra["Set-Cookie"] = f"{SESSION_COOKIE}={SESSION_SECRET}; Path=/; HttpOnly; SameSite=Strict"
         dist_page = render_dist_index()
         if dist_page is not None:
             csp = ("default-src 'self'; img-src http: https: data:; style-src 'self'; "
                    "script-src 'self'; connect-src 'self'; media-src 'self'; frame-ancestors 'none'")
-            return self._send(200, dist_page, "text/html; charset=utf-8", {"Content-Security-Policy": csp})
+            return self._send(200, dist_page, "text/html; charset=utf-8", {**extra, "Content-Security-Policy": csp})
         page = INDEX_HTML.replace("__TOKEN__", TOKEN).encode("utf-8")
         csp = ("default-src 'self'; img-src http: https: data:; style-src 'unsafe-inline'; "
                "script-src 'unsafe-inline'; connect-src 'self'; media-src 'self'; frame-ancestors 'none'")
-        return self._send(200, page, "text/html; charset=utf-8", {"Content-Security-Policy": csp})
+        return self._send(200, page, "text/html; charset=utf-8", {**extra, "Content-Security-Policy": csp})
 
     def _handle_library_get(self, path: str) -> bool:
-        if path == "/api/library/organizer":
-            self._json(ORGANIZER.snapshot())
-            return True
-        if path == "/api/library/trash":
-            self._json({"items": LIBRARY.trash_items()})
-            return True
-        return False
+        return webui_routes_library.library_get(sys.modules[__name__], self, path)
 
     def _handle_jobs_get(self, path: str, q: dict) -> bool:
-        if path == "/api/state":
-            views = [job.view(ROOT) for job in JOB_MANAGER.snapshot(newest_first=True)]
-            try:
-                client_rev = int((q.get("rev") or ["-1"])[0])
-            except ValueError:
-                client_rev = -1
-            data = {"version": yt_dlp.version.__version__, "ffmpeg": grab.ffmpeg_available(),
-                    "playwright": importlib.util.find_spec("playwright") is not None,
-                    "root": str(ROOT), "rev": FILES_REV, "jobs": views,
-                    "queue_paused": QUEUE.paused, "queue_order": QUEUE.pending_ids(),
-                    "window": WINDOW_MODE, "desktop_notifications": desktop_notifications_supported()}
-            if WINDOW_MODE and NATIVE_DESKTOP is not None:
-                data["native_notifications"] = {"enabled": NATIVE_DESKTOP.notifications_enabled,
-                                                 "available": NATIVE_DESKTOP.notifications_available}
-            if client_rev != FILES_REV:
-                data["files"] = list_files(force=client_rev < 0)
-                data["library_scan"] = FILES_CACHE.get("scan")
-                data["collections"] = LIBRARY.collections()
-                data["smart_collections"] = LIBRARY.smart_collections()
-            self._json(data)
-            return True
-        m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/log", path)
-        if m:
-            job = JOB_MANAGER.get(m.group(1))
-            self._json({"lines": list(job.log)[-200:] if job else []})
-            return True
-        return False
+        return webui_routes_jobs.jobs_get(sys.modules[__name__], self, path, q)
 
     def _handle_subscriptions_get(self, path: str) -> bool:
-        if path == "/api/subscriptions":
-            subs = SUBSCRIPTION_MANAGER.snapshot(newest_first=True)
-            self._json({"subscriptions": [subscription_view(s) for s in subs],
-                        "interval_seconds": SUB_INTERVAL_SECONDS})
-            return True
-        return False
+        return webui_routes_subscriptions.subscriptions_get(sys.modules[__name__], self, path)
 
     def _handle_system_get(self, path: str, q: dict) -> bool:
-        if path == "/api/doctor":
-            flag = lambda k: bool((q.get(k) or [""])[0])  # noqa: E731
-            self._json(collect_doctor(net=flag("net"), force=flag("force")))
-            return True
-        if path == "/api/cookies":
-            self._json(cookies_status())
-            return True
-        if path == "/api/setup":
-            self._json(setup_status())
-            return True
-        if path == "/api/ytdlp/check":
-            self._json(check_ytdlp(force=bool((q.get("force") or [""])[0])))
-            return True
-        if path == "/api/ytdlp/update-status":
-            with UPDATE_LOCK:
-                self._json({k: (list(v) if isinstance(v, list) else v) for k, v in UPDATE.items()})
-            return True
-        return False
+        return webui_routes_system.system_get(sys.modules[__name__], self, path, q)
 
     def do_GET(self):
         u = urlparse(self.path)
@@ -1817,13 +1625,16 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         if u.path == "/":
-            return self._handle_root_page()
+            return self._handle_root_page(q)
         if u.path.startswith("/assets/"):
             asset = read_static_asset(u.path.lstrip("/"))
             if asset is None:
                 return self._json({"error": "not found"}, 404)
             body, ctype = asset
             return self._send(200, body, ctype, {"Cache-Control": "public, max-age=31536000, immutable"})
+        if u.path.startswith("/files/") and self._session_cookie_ok():
+            # Media elements cannot send headers; the HttpOnly same-site cookie replaces a token in the URL.
+            return self._file(unquote(u.path[len("/files/"):]))
         if not self._authed(q):
             return
         if self._handle_library_get(u.path):
@@ -1838,574 +1649,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(unquote(u.path[len("/files/"):]))
         self._json({"error": "not found"}, 404)
 
-    def _handle_library_import(self, q: dict):
-        if (self.headers.get("Content-Type") or "").split(";")[0] != "application/octet-stream":
-            return self._json({"error": "bad content type"}, 415)
-        try:
-            size = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            size = 0
-        if not 0 < size <= IMPORT_MAX_BYTES:
-            return self._json({"error": "Choose a non-empty media file up to 8 GiB."}, 413)
-        if not FOLDER_PICK_LOCK.acquire(blocking=False):
-            return self._json({"error": "A file import or folder chooser is already running."}, 409)
-        previous_timeout = self.connection.gettimeout()
-        try:
-            self.connection.settimeout(30)
-            result = LIBRARY.import_file((q.get("name") or [""])[0], self.rfile, size)
-            bump_rev()
-            return self._json(result)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-            return
-        except ValueError as error:
-            return self._json({"error": str(error)}, 400)
-        except FileExistsError:
-            return self._json({"error": "A file with that name already exists. Rename it before importing."}, 409)
-        except OSError:
-            return self._json({"error": "Could not import this file. Check permissions, available space and filename conflicts."}, 409)
-        finally:
-            self.connection.settimeout(previous_timeout)
-            FOLDER_PICK_LOCK.release()
+    def _handle_library_import(self, q: dict) -> bool:
+        return webui_routes_library.library_import(sys.modules[__name__], self, q)
 
     def _handle_backup_post(self, path: str, body: dict) -> bool:
-        if path not in {"/api/backup/export", "/api/backup/preview", "/api/backup/restore"}:
-            return False
-        desktop = NATIVE_DESKTOP if WINDOW_MODE else None
-        service = BackupService(LIBRARY, CONFIG_DIR / "desktop.json", desktop.preferences_lock if desktop else SETTINGS_LOCK)
-        try:
-            if path.endswith("/export"):
-                defaults = {"close_behavior": desktop.close_behavior, "notifications_enabled": desktop.notifications_enabled} if desktop else None
-                self._json(service.export(body.get("preferences", {}), defaults))
-                return True
-            if path.endswith("/preview"):
-                self._json(service.preview(body.get("backup"), body.get("current", {})))
-                return True
-            result = service.restore(body.get("backup"), body.get("current", {}), body.get("review_token"))
-            if desktop:
-                desktop.reload_preferences()
-            bump_rev()
-            self._json(result)
-            return True
-        except ValueError as error:
-            self._json({"error": str(error)}, 400)
-            return True
-        except OSError:
-            logging.getLogger(__name__).exception("Backup operation failed. Check for retained restore recovery copies before retrying.")
-            self._json({"error": "Could not save restored data. Check permissions and available space, then preview again."}, 409)
-            return True
+        return webui_routes_library.backup_post(sys.modules[__name__], self, path, body)
 
     def _handle_library_post(self, path: str, body: dict) -> bool:
-        if path == "/api/library/repair":
-            try:
-                p = LIBRARY.media_path(body.get("path"))
-                relative = p.relative_to(ROOT).as_posix()
-                record = library_records().get(relative, {})
-                if record.get("complete") is not False or not isinstance(record.get("repair_options"), dict):
-                    raise ValueError("This item cannot be repaired locally. Download it again.")
-                url = http_url(record.get("source_url"))
-                if not url:
-                    raise ValueError("The original settings are missing. Download this item again.")
-                options = {"_repair_path": relative, "mode": record["repair_options"].get("mode", "mp4")}
-                ids = create_jobs([url], options)
-                bump_rev()
-                self._json({"ids": ids, "duplicates": not bool(ids)})
-                return True
-            except FileNotFoundError as e:
-                self._json({"error": str(e)}, 404)
-                return True
-            except (ValueError, OSError) as e:
-                self._json({"error": str(e)}, 400)
-                return True
-
-        if path in ("/api/library/details", "/api/library/playback"):
-            try:
-                if "root" in body and body["root"] != str(ROOT):
-                    raise ValueError("The library changed. Refresh before saving playback progress.")
-                if path.endswith("/details"):
-                    LIBRARY.describe(body.get("path"), body.get("tags"), body.get("note"))
-                else:
-                    LIBRARY.save_playback(body.get("path"), body.get("position"), body.get("duration"))
-                bump_rev()
-                self._json({"ok": True})
-                return True
-            except ValueError as error:
-                self._json({"error": str(error)}, 400)
-                return True
-            except OSError:
-                self._json({"error": "Could not save file details. Refresh Library and check folder permissions."}, 409)
-                return True
-
-        if path in ("/api/library/organize", "/api/library/collections", "/api/library/smart-collections"):
-            try:
-                with QUEUE.mutex:
-                    if path.endswith("/organize"):
-                        result = LIBRARY.organize(body.get("items"), favorite=body.get("favorite"),
-                                                  collection_id=body.get("collection_id"), remove=body.get("remove", False))
-                    elif path.endswith("/smart-collections"):
-                        collection_id = LIBRARY.change_smart_collection(body.get("action"), body.get("name"),
-                                                                        body.get("id"), body.get("rules"))
-                        result = {"id": collection_id, "smart_collections": LIBRARY.smart_collections()}
-                    else:
-                        collection_id = LIBRARY.change_collection(body.get("action"), body.get("name"), body.get("id"))
-                        result = {"id": collection_id, "collections": LIBRARY.collections()}
-                bump_rev()
-                self._json(result)
-                return True
-            except ValueError as error:
-                self._json({"error": str(error)}, 400)
-                return True
-            except OSError:
-                self._json({"error": "Could not save Library organization. Check folder permissions and disk space."}, 409)
-                return True
-
-        if path in ("/api/library/organizer", "/api/library/organizer/recycle"):
-            try:
-                with QUEUE.mutex:
-                    if path.endswith("/recycle"):
-                        result = ORGANIZER.recycle(body.get("scan_id"), body.get("items"))
-                    elif body.get("action") == "start":
-                        result = ORGANIZER.start(entry_limit=FILE_SCAN_MAX_ENTRIES, max_depth=FILE_SCAN_MAX_DEPTH)
-                    elif body.get("action") == "cancel":
-                        result = ORGANIZER.cancel()
-                    else:
-                        raise ValueError("Choose a valid library check action.")
-                if path.endswith("/recycle") and result["processed"]:
-                    save_history()
-                    bump_rev()
-                self._json(result)
-                return True
-            except ValueError as error:
-                self._json({"error": str(error)}, 400)
-                return True
-            except OSError:
-                self._json({"error": "Files are unavailable or changed. Run a new check."}, 409)
-                return True
-
-        if path == "/api/library/batch":
-            action, items = body.get("action"), body.get("items")
-            if action not in ("trash", "restore", "purge") or not isinstance(items, list) or not 1 <= len(items) <= 200 or any(not isinstance(item, str) for item in items):
-                self._json({"error": "Choose between 1 and 200 files and a valid action"}, 400)
-                return True
-            processed, failed, recovery_ids = [], [], []
-            with QUEUE.mutex:
-                if any(job.status == "running" for job in JOB_MANAGER.snapshot()):
-                    self._json({"error": "Wait for running downloads to finish before editing files"}, 409)
-                    return True
-                if action == "trash":
-                    completions = {p: record.get("complete") for p, record in library_records().items()
-                                   if isinstance(record, dict)}
-                    result = LIBRARY.trash_many(items, completions=completions)
-                    processed, failed, recovery_ids = result["processed"], result["failed"], result["recovery_ids"]
-                else:
-                    for item in dict.fromkeys(items):
-                        try:
-                            if action == "restore":
-                                LIBRARY.restore(item)
-                            else:
-                                LIBRARY.purge(item)
-                            processed.append(item)
-                        except (ValueError, OSError) as error:
-                            failed.append({"item": item, "error": str(error)})
-            save_history()
-            bump_rev()
-            self._json({"processed": processed, "failed": failed, "recovery_ids": recovery_ids})
-            return True
-
-        if path in ("/api/library/rename", "/api/library/trash", "/api/library/restore", "/api/library/purge"):
-            try:
-                with QUEUE.mutex:
-                    if any(job.status == "running" for job in JOB_MANAGER.snapshot()):
-                        self._json({"error": "Wait for running downloads to finish before editing files"}, 409)
-                        return True
-                    completion = None
-                    if path.endswith(("/rename", "/trash")):
-                        old = LIBRARY.media_path(body.get("path"))
-                        for job in reversed(JOB_MANAGER.snapshot()):
-                            linked = next((p for p in job.files if Path(p).resolve() == old), None)
-                            if linked:
-                                completion = output_complete(old, job.status, job.media_metadata.get(linked, {}).get("complete"))
-                                break
-                    if path.endswith("/rename"):
-                        relative = LIBRARY.rename(body.get("path"), body.get("name"), complete=completion)
-                        new = str(ROOT / relative)
-                        with JOB_MANAGER.lock:
-                            for job in JOBS.values():
-                                linked = any(Path(p).resolve() == old for p in job.files)
-                                job.files = [new if Path(p).resolve() == old else p for p in job.files]
-                                job.seen_paths = [new if Path(p).resolve() == old else p for p in job.seen_paths]
-                                job.media_metadata = {new if Path(p).resolve() == old else p: info
-                                                      for p, info in job.media_metadata.items()}
-                                if linked and isinstance(completion, bool):
-                                    job.media_metadata.setdefault(new, {})["complete"] = completion
-                        result = {"path": relative}
-                    elif path.endswith("/trash"):
-                        result = {"id": LIBRARY.trash(body.get("path"), complete=completion)}
-                    elif path.endswith("/purge"):
-                        LIBRARY.purge(str(body.get("id") or ""))
-                        result = {"ok": True}
-                    else:
-                        result = {"path": LIBRARY.restore(str(body.get("id") or ""))}
-                save_history()
-                bump_rev()
-                self._json(result)
-                return True
-            except FileNotFoundError as e:
-                self._json({"error": str(e)}, 404)
-                return True
-            except FileExistsError as e:
-                self._json({"error": str(e)}, 409)
-                return True
-            except ValueError as e:
-                self._json({"error": str(e)}, 400)
-                return True
-            except OSError:
-                self._json({"error": "Could not update the file. Check permissions and close any player using it."}, 409)
-                return True
-
-        return False
+        return webui_routes_library.library_post(sys.modules[__name__], self, path, body)
 
     def _handle_jobs_post(self, path: str, body: dict) -> bool:
-        if path == "/api/jobs":
-            if UPDATE["status"] == "running":
-                self._json({"error": "Currently updating yt-dlp, please add tasks later"}, 409)
-                return True
-            raw = body.get("urls") or []
-            urls = list(dict.fromkeys(x.strip() for x in raw if isinstance(x, str) and http_url(x)))[:200]
-            if not urls:
-                self._json({"error": "No valid URLs found (requires http:// or https://)"}, 400)
-                return True
-            options = body.get("options") or {}
-            if not isinstance(options, dict):
-                self._json({"error": "options must be an object"}, 400)
-                return True
-            action = body.get("existing_action")
-            if action not in (None, "skip", "download"):
-                self._json({"error": "Choose a valid existing download action"}, 400)
-                return True
-            matches = downloaded_matches(urls, options) if body.get("check_existing") is True else []
-            if matches and action is None:
-                exact_urls = {item["url"] for item in matches if item["settings_match"]}
-                preferred = [item for item in matches if item["url"] not in exact_urls or item["settings_match"]]
-                self._json({"ids": [], "duplicates": 0, "existing": preferred})
-                return True
-            skipped = set(item["url"] for item in matches) if action == "skip" else set()
-            if action == "download":
-                options = {**options, "_download_copy": True, "archive": False}
-            pending = [url for url in urls if url not in skipped]
-            ids = create_jobs(pending, options) if pending else []
-            if body.get("check_existing") is True:
-                self._json({"ids": ids, "duplicates": len(pending) - len(ids), "skipped_existing": len(skipped)})
-                return True
-            self._json({"ids": ids, "duplicates": len(urls) - len(ids)})
-            return True
-
-        if path == "/api/queue":
-            if not isinstance(body.get("paused"), bool):
-                self._json({"error": "paused must be true or false"}, 400)
-                return True
-            QUEUE.set_paused(body["paused"])
-            save_history()
-            self._json({"paused": QUEUE.paused})
-            return True
-
-        m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/retry-browser", path)
-        if m:
-            job = JOB_MANAGER.get(m[1])
-            browser = body.get("browser")
-            if not job:
-                self._json({"error": "Task not found"}, 404)
-                return True
-            if not isinstance(browser, str) or browser not in BROWSERS:
-                self._json({"error": "Choose a browser to use its sign-in session"}, 400)
-                return True
-            if job.status not in ("error", "canceled") or UPDATE["status"] == "running":
-                self._json({"error": "This task cannot be retried right now"}, 409)
-                return True
-            retry = Job(job.url, {**job.options, "cookies_from_browser": browser, "use_cookies_file": False})
-            retry.status, retry.source, retry.work_key = job.status, job.source, job.work_key
-            retry.failed_items = [dict(item) for item in job.failed_items]
-            ids = JOB_MANAGER.retry(retry)
-            save_history()
-            bump_rev()
-            self._json({"ids": ids, "duplicates": not bool(ids)})
-            return True
-
-        if path == "/api/jobs/batch":
-            action, ids = body.get("action"), body.get("ids")
-            if action not in ("cancel", "retry", "remove") or not isinstance(ids, list) or not ids:
-                self._json({"error": "Choose an action and job IDs"}, 400)
-                return True
-            if len(ids) > HISTORY_MAX or any(not isinstance(i, str) or not re.fullmatch(r"[0-9a-f]{8}", i) for i in ids):
-                self._json({"error": "Invalid job IDs"}, 400)
-                return True
-            if action == "retry" and UPDATE["status"] == "running":
-                self._json({"error": "Currently updating yt-dlp, please retry later"}, 409)
-                return True
-            processed, skipped = JOB_MANAGER.batch(list(dict.fromkeys(ids)), action)
-            save_history()
-            self._json({"processed": processed, "skipped": skipped})
-            return True
-
-        m = re.fullmatch(r"/api/jobs/([0-9a-f]{8})/(cancel|retry|remove|move-up|move-down)", path)
-        if m:
-            job, action = JOB_MANAGER.get(m.group(1)), m.group(2)
-            if not job:
-                self._json({"error": "Job not found"}, 404)
-                return True
-            if action.startswith("move-"):
-                if not QUEUE.move(job.id, -1 if action == "move-up" else 1):
-                    self._json({"error": "Only waiting jobs can be reordered"}, 409)
-                    return True
-                save_history()
-            elif action == "cancel":
-                processed, _ = JOB_MANAGER.batch([job.id], "cancel")
-                if not processed:
-                    self._json({"error": "Only queued or running jobs can be canceled"}, 409)
-                    return True
-                save_history()
-            elif action == "retry":
-                if job.status not in ("error", "canceled"):
-                    self._json({"error": "Only failed or canceled jobs can be retried"}, 409)
-                    return True
-                if UPDATE["status"] == "running":
-                    self._json({"error": "Currently updating yt-dlp, please retry later"}, 409)
-                    return True
-                ids = JOB_MANAGER.retry(job)
-                save_history()
-                self._json({"ids": ids, "duplicates": not ids})
-                return True
-            elif action == "remove":
-                if job.status not in ("done", "error", "canceled"):
-                    self._json({"error": "Running jobs must be canceled before removal"}, 409)
-                    return True
-                JOB_MANAGER.remove_finished(job.id)
-                save_history()
-            self._json({"ok": True})
-            return True
-
-        if path == "/api/clear":
-            JOB_MANAGER.clear_finished()
-            save_history()
-            self._json({"ok": True})
-            return True
-
-        return False
+        return webui_routes_jobs.jobs_post(sys.modules[__name__], self, path, body)
 
     def _handle_subscriptions_post(self, path: str, body: dict) -> bool:
-        if path == "/api/subscriptions":
-            url = http_url(body.get("url"))
-            if not url:
-                self._json({"error": "Please enter an http(s) URL"}, 400)
-                return True
-            backfill = str(body.get("backfill") or "none")
-            try:
-                backfill_count = int(body.get("backfill_count") or 5)
-            except (TypeError, ValueError):
-                backfill_count = 5
-            options = body.get("options") if isinstance(body.get("options"), dict) else {}
-            if options.get("mode") in ("cover", "image"):
-                self._json({"error": "Subscriptions currently support video and audio only."}, 400)
-                return True
-            sub = Subscription(url, options, backfill, backfill_count, body.get("filters"))
-            SUBSCRIPTION_MANAGER.add(sub)
-            save_subscriptions()
-            start_subscription_check(sub)
-            self._json(subscription_view(sub))
-            return True
-
-        m = re.fullmatch(r"/api/subscriptions/([0-9a-f]{8})/(update|check-now|preview|remove)", path)
-        if m:
-            sub, action = SUBSCRIPTION_MANAGER.get(m.group(1)), m.group(2)
-            if not sub:
-                self._json({"error": "Subscription not found"}, 404)
-                return True
-            if action == "update":
-                if isinstance(body.get("options"), dict) and body["options"].get("mode") in ("cover", "image"):
-                    self._json({"error": "Subscriptions currently support video and audio only."}, 400)
-                    return True
-                if "enabled" in body:
-                    if not isinstance(body["enabled"], bool):
-                        self._json({"error": "enabled must be true or false"}, 400)
-                        return True
-                    sub.enabled = bool(body["enabled"])
-                if "options" in body and isinstance(body["options"], dict):
-                    sub.options = dict(body["options"])
-                if "filters" in body:
-                    if not isinstance(body["filters"], dict):
-                        self._json({"error": "filters must be an object"}, 400)
-                        return True
-                    sub.filters = normalize_subscription_filters(body["filters"])
-                if body.get("backfill") in ("none", "recent"):
-                    sub.backfill = body["backfill"]
-                if "backfill_count" in body:
-                    try:
-                        sub.backfill_count = max(1, min(int(body["backfill_count"]), BACKFILL_MAX))
-                    except (TypeError, ValueError):
-                        pass
-                save_subscriptions()
-                self._json(subscription_view(sub))
-                return True
-            if action == "check-now":
-                start_subscription_check(sub)
-                self._json({"ok": True})
-                return True
-            if action == "preview":
-                if "filters" in body and not isinstance(body["filters"], dict):
-                    self._json({"error": "filters must be an object"}, 400)
-                    return True
-                try:
-                    self._json(preview_subscription(sub, body.get("filters", sub.filters)))
-                except Exception as e:  # noqa: BLE001
-                    self._json({"error": friendly_error(str(e))}, 502)
-                return True
-            if action == "remove":
-                SUBSCRIPTION_MANAGER.remove(sub.id)
-                save_subscriptions()
-                self._json({"ok": True})
-                return True
-
-        return False
+        return webui_routes_subscriptions.subscriptions_post(sys.modules[__name__], self, path, body)
 
     def _handle_system_post(self, path: str, body: dict) -> bool:
-        if path == "/api/probe":
-            url = http_url(body.get("url"))
-            if not url:
-                self._json({"error": "Please enter an http(s) URL"}, 400)
-                return True
-            self._json(probe(url, body.get("options") or {}))
-            return True
-
-        if path == "/api/download-folder/select":
-            try:
-                self._json(select_download_folder())
-            except (ValueError, OSError, subprocess.SubprocessError) as error:
-                self._json({"error": str(error)}, 409)
-            return True
-
-        if path == "/api/open-url":
-            url = http_url(body.get("url"))
-            if not url:
-                self._json({"error": "Please enter an http(s) URL"}, 400)
-                return True
-            try:
-                self._json({"ok": webbrowser.open(url)})
-            except OSError:
-                self._json({"error": "Could not open it"}, 409)
-            return True
-
-        if path == "/api/desktop/show":
-            view = body.get("view", "queue")
-            if view not in ("new", "queue", "library"):
-                self._json({"error": "Unsupported app view"}, 400)
-                return True
-            desktop = NATIVE_DESKTOP
-            if not WINDOW_MODE or desktop is None or desktop.exiting.is_set():
-                self._json({"opened": False})
-                return True
-            try:
-                desktop.show_main(view)
-            except Exception as exc:  # noqa: BLE001
-                print(f"Could not bring the desktop window forward: {exc}")
-                self._json({"error": "Could not open the main window. Use the tray menu to try again."}, 503)
-                return True
-            self._json({"opened": True})
-            return True
-
-        if path == "/api/open-folder":
-            target = ROOT
-            rel = str(body.get("path") or "")
-            if rel:
-                cand = (ROOT / rel).resolve().parent
-                try:
-                    cand.relative_to(ROOT)
-                    target = cand
-                except ValueError:
-                    pass
-            open_in_file_manager(target)
-            self._json({"ok": True})
-            return True
-
-        if path == "/api/open-file":
-            rel = str(body.get("path") or "")
-            if not rel:
-                self._json({"error": "No file given"}, 400)
-                return True
-            target = (ROOT / rel).resolve()
-            try:
-                target.relative_to(ROOT)
-            except ValueError:
-                self._json({"error": "forbidden"}, 403)
-                return True
-            if not target.is_file() or target.suffix.lower() not in MEDIA_SUFFIX:
-                self._json({"error": "File not found"}, 404)
-                return True
-            open_file(target)
-            self._json({"ok": True})
-            return True
-
-        if path == "/api/notify":
-            if not desktop_notifications_supported():
-                self._json({"ok": False})
-                return True
-            title = str(body.get("title") or "Video Grabber")[:120]
-            message = str(body.get("body") or "")[:500]
-            self._json({"ok": show_desktop_notification(title, message)})
-            return True
-
-        if path == "/api/desktop/notifications":
-            if not WINDOW_MODE or NATIVE_DESKTOP is None or NATIVE_DESKTOP.exiting.is_set():
-                self._json({"error": "Desktop notifications are unavailable."}, 409)
-                return True
-            enabled = body.get("enabled")
-            if not isinstance(enabled, bool):
-                self._json({"error": "enabled must be a boolean"}, 400)
-                return True
-            try:
-                NATIVE_DESKTOP.set_notifications(enabled)
-            except OSError:
-                self._json({"error": "Could not save notification preferences."}, 500)
-                return True
-            self._json({"ok": True})
-            return True
-
-        if path == "/api/cookies":
-            text = body.get("text")
-            if not isinstance(text, str) or not text.strip():
-                self._json({"error": "Empty file, or larger than 3 MB."}, 400)
-                return True
-            try:
-                self._json(save_cookies(text))
-            except ValueError as e:
-                self._json({"error": str(e)}, 400)
-            except OSError as e:
-                self._json({"error": f"Could not save the file: {e}"}, 500)
-            return True
-
-        if path == "/api/cookies/delete":
-            delete_cookies()
-            self._json({"present": False})
-            return True
-
-        if path == "/api/setup":
-            ok, error = start_setup()
-            self._json({"ok": True} if ok else {"error": error}, 200 if ok else 409)
-            return True
-
-        if path == "/api/ytdlp/update":
-            extras = body.get("extras") if body.get("extras") in ("default", "default,deno") else "default"
-            ok, why = start_update(extras)
-            self._json({"ok": True} if ok else {"error": why}, 200 if ok else 409)
-            return True
-
-        if path == "/api/restart":
-            if active_jobs() or UPDATE["status"] == "running" or FOLDER_PICK_LOCK.locked():
-                self._json({"error": "Tasks are still running, wait for them to finish before restarting."}, 409)
-                return True
-            self._json({"ok": True})
-            threading.Timer(0.5, restart_self).start()
-            return True
-
-        return False
+        return webui_routes_system.system_post(sys.modules[__name__], self, path, body)
 
     def do_POST(self):
         u = urlparse(self.path)
@@ -2577,7 +1837,7 @@ def main(argv=None) -> None:
     PORT = srv.server_port
     WINDOW_MODE = ui_mode == "window"
     UI_MODE = ui_mode
-    url = f"http://127.0.0.1:{PORT}/"
+    url = launch_url(PORT)
     print(("Restarted:" if restarting else "Video Grabber WebUI started:") + url)
     print(f"Download Directory: {ROOT}")
     if not grab.ffmpeg_available():

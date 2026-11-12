@@ -1,6 +1,9 @@
+import ast
 import hashlib
 import json
+import re
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -203,3 +206,24 @@ def test_python_package_install_is_forced_into_portable_runtime(monkeypatch, tmp
 def test_portable_launcher_defaults_to_native_window():
     launcher = (portable_bootstrap.APP_ROOT / "portable_launcher.py").read_text(encoding="utf-8")
     assert 'default_args = ["--ui", "window"' in launcher
+
+
+def test_portable_build_ships_every_local_module_the_app_imports():
+    """A module missing from the ZIP only shows up when the unzipped app is started, so check the file list."""
+    root = Path(__file__).resolve().parent.parent
+    local = {path.stem for path in root.glob("*.py")}
+    needed, todo = set(), ["portable_launcher", "webui"]
+    while todo:
+        name = todo.pop()
+        if name in needed:
+            continue
+        needed.add(name)
+        for node in ast.walk(ast.parse((root / f"{name}.py").read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                todo += [alias.name.split(".")[0] for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                todo.append(node.module.split(".")[0])
+        todo = [item for item in todo if item in local]
+    script = (root / "scripts" / "build_portable.ps1").read_text(encoding="utf-8")
+    shipped = set(re.findall(r'"([A-Za-z0-9_]+)\.py"', script))
+    assert needed - shipped == set()
