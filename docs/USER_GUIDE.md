@@ -652,6 +652,32 @@ Telegram and ntfy receive only the title, the video title or link, and for failu
 **Send a test notification** in Settings checks every channel even while `enabled` is false.
 Settings shows only each channel's type and host; addresses and tokens never leave the file.
 
+## Automation API
+
+Programs on this computer (a script, AutoHotkey, Raycast, n8n desktop) can add downloads and read
+their progress. Open **Settings and help → Automation API → Turn on the API**. The app shows a
+token once; copy it then, because only a fingerprint of it is saved. **Create a new token** replaces
+it, and programs using the old one stop working. The address is shown in Settings, for example
+`http://127.0.0.1:8765/api/v1`; the port can change if 8765 is busy when the app starts.
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/v1/downloads \
+  -H "Authorization: Bearer vg_…" -H "Content-Type: application/json" \
+  -d '{"urls": ["https://example.com/watch?v=1"], "mode": "mp3", "abr": 320}'
+```
+
+| Request | Purpose |
+| --- | --- |
+| `POST /api/v1/downloads` | Add 1–50 links. Optional: `mode` (`mp4`, `mp3`, `original`, `cover`, `image`), `quality` (`best` or a height such as `1080`), `abr` (96–320), `no_playlist`, `subtitles`. Returns `202` with task `ids`; links already queued with the same settings count as `duplicates`. |
+| `GET /api/v1/jobs/<id>` | One task's status, progress, error and file names. |
+| `GET /api/v1/status` | Task counts by status, whether the queue is paused, and whether it waits for the download schedule. |
+
+For safety the API is off by default, accepts only connections from this computer, and cannot set
+cookies, proxies, referers, folders or page rendering, or read, change or delete Library files.
+The app's own page and the Chrome extension cannot turn it on or read its token. Web pages cannot
+call it, because it sends no cross-origin permission headers. Downloads added this way use the
+same rules, schedule, hooks and notifications as any other download.
+
 ## yt-dlp plugins
 
 yt-dlp plugins, such as a PO Token provider for YouTube or an extractor for an extra site, work in

@@ -220,6 +220,16 @@ export const getCookies = () => api<CookieStatus>('/api/cookies')
 export const getAccess = () => api<{ extension: boolean }>('/api/access')
 export const setExtensionAccess = (extension: boolean) =>
   api<{ extension: boolean }>('/api/access', { method: 'POST', body: JSON.stringify({ extension }) })
+export interface AutomationApiStatus {
+  enabled: boolean
+  has_token: boolean
+  base_url: string
+  /** Present only in the response that created it; the app never shows it again. */
+  token?: string
+}
+export const getAutomationApi = () => api<AutomationApiStatus>('/api/automation-api')
+export const changeAutomationApi = (action: 'enable' | 'disable' | 'new_token') =>
+  post<AutomationApiStatus>('/api/automation-api', { action })
 export const getHooks = () => api<HooksStatus>('/api/hooks')
 export const openHooksConfig = () => post<HooksStatus>('/api/hooks/open-config')
 export const testNotifications = () => post<NotificationTestResponse>('/api/hooks/test-notifications')

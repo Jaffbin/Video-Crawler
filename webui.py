@@ -66,6 +66,8 @@ import webui_routes_library  # noqa: E402
 import webui_routes_jobs  # noqa: E402
 import webui_routes_subscriptions  # noqa: E402
 import webui_routes_system  # noqa: E402
+import webui_routes_api  # noqa: E402
+import grab_api  # noqa: E402
 from grab_subscriptions import (  # noqa: E402
     filter_subscription_entries, normalize_flat_entries, split_backfill, subscription_filter_reason,
 )
@@ -1265,6 +1267,35 @@ def set_extension_access(enabled: bool) -> None:
     store.save({**(data if isinstance(data, dict) else {}), "extension": enabled})
 
 
+# ───────────────────────── Automation API ─────────────────────────
+def _api_store() -> JsonStore:
+    return JsonStore(lambda: CONFIG_DIR / "api.json", SETTINGS_LOCK)
+
+
+def api_settings() -> dict:
+    return grab_api.settings(_api_store().load({}))
+
+
+def api_settings_view() -> dict:
+    saved = api_settings()
+    return {"enabled": saved["enabled"], "has_token": bool(saved["token_sha256"]),
+            "base_url": f"http://127.0.0.1:{PORT}/api/v1"}
+
+
+def change_api_settings(action: str) -> dict:
+    """enable / disable / new_token. A new token is returned once and never stored in plain text."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    store = _api_store()
+    saved = grab_api.settings(store.load({}))
+    token = None
+    if action == "new_token" or (action == "enable" and not saved["token_sha256"]):
+        token, saved["token_sha256"] = grab_api.new_token()
+    if action in ("enable", "disable"):
+        saved["enabled"] = action == "enable"
+    store.save(saved)
+    return {**api_settings_view(), **({"token": token} if token else {})}
+
+
 # ───────────────────────── Download schedule ─────────────────────────
 SCHEDULE = dict(grab_schedule.DEFAULT)
 
@@ -1718,7 +1749,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path.startswith("/files/") and self._session_cookie_ok():
             # Media elements cannot send headers; the HttpOnly same-site cookie replaces a token in the URL.
             return self._file(unquote(u.path[len("/files/"):]))
+        if u.path.startswith("/api/v1/"):
+            # The automation API has its own token; the page token never authorizes it.
+            return webui_routes_api.v1_get(sys.modules[__name__], self, u.path)
         if not self._authed(q):
+            return
+        if webui_routes_api.settings_get(sys.modules[__name__], self, u.path):
             return
         if self._handle_library_get(u.path):
             return
@@ -1753,7 +1789,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
-        if not self._guard() or not self._authed(q):
+        if not self._guard():
+            return
+        if u.path.startswith("/api/v1/"):
+            if "application/json" not in (self.headers.get("Content-Type") or ""):
+                self._discard_rejected_body()
+                return self._json({"error": "Send the request body as application/json."}, 415)
+            return webui_routes_api.v1_post(sys.modules[__name__], self, u.path, self._body())
+        if not self._authed(q):
             return
         if u.path == "/api/library/import":
             return self._handle_library_import(q)
@@ -1771,6 +1814,8 @@ class Handler(BaseHTTPRequestHandler):
         if self._handle_subscriptions_post(u.path, body):
             return
         if self._handle_system_post(u.path, body):
+            return
+        if webui_routes_api.settings_post(sys.modules[__name__], self, u.path, body):
             return
 
         self._json({"error": "not found"}, 404)

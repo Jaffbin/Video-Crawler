@@ -2176,6 +2176,39 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'After downloads': ['下载之后', '下載之後', 'ダウンロード後'],
   'Auto rules': ['自动规则', '自動規則', '自動ルール'],
   'Download schedule': ['下载时间表', '下載時間表', 'ダウンロードスケジュール'],
+  'Automation API': ['自动化 API', '自動化 API', '自動化 API'],
+  'Lets programs on this computer, such as scripts or n8n, add downloads and check their progress. They can only choose the format and quality; cookies, proxies, folders and your Library stay out of reach. Programs on other devices cannot connect.':
+    [
+      '让这台电脑上的程序（例如脚本或 n8n）添加下载并查看进度。它们只能选择格式和画质，无法接触 cookie、代理、下载文件夹和媒体库。其他设备上的程序无法连接。',
+      '讓這台電腦上的程式（例如指令碼或 n8n）新增下載並查看進度。它們只能選擇格式和畫質，無法接觸 cookie、代理、下載資料夾和媒體庫。其他裝置上的程式無法連線。',
+      'このコンピューター上のプログラム（スクリプトや n8n など）がダウンロードを追加し、進行状況を確認できます。選べるのは形式と画質だけで、Cookie・プロキシ・フォルダー・ライブラリには触れられません。他のデバイスからは接続できません。',
+    ],
+  'On. Address: {url}': ['已开启。地址：{url}', '已開啟。位址：{url}', 'オン。アドレス：{url}'],
+  'Off. Other programs cannot add downloads.': [
+    '已关闭。其他程序无法添加下载。',
+    '已關閉。其他程式無法新增下載。',
+    'オフ。他のプログラムはダウンロードを追加できません。',
+  ],
+  'Copy this token now. It will not be shown again.': [
+    '请现在复制这个令牌，之后不会再显示。',
+    '請現在複製這個權杖，之後不會再顯示。',
+    'このトークンを今コピーしてください。再表示されません。',
+  ],
+  'Copy token': ['复制令牌', '複製權杖', 'トークンをコピー'],
+  'Could not copy. Select the token and copy it yourself.': [
+    '无法复制，请手动选中令牌复制。',
+    '無法複製，請手動選取權杖複製。',
+    'コピーできませんでした。トークンを選択して手動でコピーしてください。',
+  ],
+  'Programs using the current token will stop working until you give them the new one.': [
+    '使用当前令牌的程序会停止工作，直到你把新令牌交给它们。',
+    '使用目前權杖的程式會停止運作，直到你把新權杖交給它們。',
+    '現在のトークンを使うプログラムは、新しいトークンを設定するまで動かなくなります。',
+  ],
+  'Replace token': ['替换令牌', '替換權杖', 'トークンを置き換える'],
+  'Turn on the API': ['开启 API', '開啟 API', 'API をオンにする'],
+  'Turn off the API': ['关闭 API', '關閉 API', 'API をオフにする'],
+  'Create a new token': ['创建新令牌', '建立新權杖', '新しいトークンを作成'],
   'Download schedule saved': [
     '下载时间表已保存',
     '下載時間表已儲存',
