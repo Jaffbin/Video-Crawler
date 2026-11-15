@@ -2176,12 +2176,34 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'After downloads': ['下载之后', '下載之後', 'ダウンロード後'],
   'Auto rules': ['自动规则', '自動規則', '自動ルール'],
   'Auto rules updated': ['自动规则已更新', '自動規則已更新', '自動ルールを更新しました'],
-  'When a download finishes, every rule whose conditions all match adds its tags, collections or favorite. Files are never moved, and files already in the Library are not changed.':
+  'When a download finishes, every rule whose conditions all match adds its tags, collections or favorite. Files are never moved. To classify files already in the Library, use Apply to existing files.':
     [
-      '下载完成时，所有条件都符合的规则会自动加上它的标签、合集或收藏。文件不会被移动，媒体库中已有的文件也不会被改动。',
-      '下載完成時，所有條件都符合的規則會自動加上它的標籤、合集或收藏。檔案不會被移動，媒體庫中已有的檔案也不會被變更。',
-      'ダウンロード完了時、すべての条件に一致したルールがタグ・コレクション・お気に入りを追加します。ファイルは移動されず、ライブラリにある既存のファイルも変更されません。',
+      '下载完成时，所有条件都符合的规则会自动加上它的标签、合集或收藏。文件不会被移动。要整理媒体库中已有的文件，请使用「应用到现有文件」。',
+      '下載完成時，所有條件都符合的規則會自動加上它的標籤、合集或收藏。檔案不會被移動。要整理媒體庫中已有的檔案，請使用「套用到現有檔案」。',
+      'ダウンロード完了時、すべての条件に一致したルールがタグ・コレクション・お気に入りを追加します。ファイルは移動されません。ライブラリの既存ファイルを分類するには「既存のファイルに適用」を使います。',
     ],
+  'Apply to existing files': ['应用到现有文件', '套用到現有檔案', '既存のファイルに適用'],
+  'Apply auto rule {name} to existing files': [
+    '把自动规则 {name} 应用到现有文件',
+    '把自動規則 {name} 套用到現有檔案',
+    '自動ルール {name} を既存のファイルに適用',
+  ],
+  '{matched} files match {name}; {changed} of them will change. Nothing is removed and no file is moved.': [
+    '有 {matched} 个文件符合「{name}」，其中 {changed} 个会被更新。不会删除任何内容，也不会移动文件。',
+    '有 {matched} 個檔案符合「{name}」，其中 {changed} 個會被更新。不會刪除任何內容，也不會移動檔案。',
+    '{matched} 件のファイルが「{name}」に一致し、そのうち {changed} 件が更新されます。何も削除されず、ファイルも移動されません。',
+  ],
+  '{matched} files match {name}, and all of them already have what it adds.': [
+    '有 {matched} 个文件符合「{name}」，它们都已经有这条规则要加的内容。',
+    '有 {matched} 個檔案符合「{name}」，它們都已經有這條規則要加的內容。',
+    '{matched} 件のファイルが「{name}」に一致し、すべて追加内容をすでに持っています。',
+  ],
+  'Update {count} files': ['更新 {count} 个文件', '更新 {count} 個檔案', '{count} 件のファイルを更新'],
+  'Updated {count} files': [
+    '已更新 {count} 个文件',
+    '已更新 {count} 個檔案',
+    '{count} 件のファイルを更新しました',
+  ],
   'My auto rules': ['我的自动规则', '我的自動規則', 'マイ自動ルール'],
   'Create your first auto rule below.': [
     '在下方创建第一条自动规则。',

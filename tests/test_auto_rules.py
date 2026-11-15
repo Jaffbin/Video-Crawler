@@ -202,3 +202,50 @@ def test_routes_create_list_and_reject_invalid_rules(server):
     assert call(server, "/api/library/auto-rules")[1]["auto_rules"][0]["conditions"] == {"source": "bilibili.com"}
     status, body = call(server, "/api/library/auto-rules", {"action": "create", "rule": rule("x", {"source": "?"})})
     assert status == 400 and "site such as" in body["error"]
+
+
+# ── Applying to existing files ──
+def test_existing_files_preview_then_apply_even_when_the_rule_is_off(library):
+    rule_id = library.change_auto_rule("create", rule=rule("Bili", {"source": "bilibili.com"}, {"tags": ["B站"]},
+                                                            enabled=False))
+    download(library, "old.mp4", "https://www.bilibili.com/v/1")
+    download(library, "done.mp4", "https://bilibili.com/v/2")
+    download(library, "other.mp4", "https://example.com/v/3")
+    library.describe("done.mp4", ["B站"], "")
+    media(library, "untracked.mp4")  # discovered on disk, no record: no source, so no match
+    files = [(name, "video") for name in ("old.mp4", "done.mp4", "other.mp4", "untracked.mp4")]
+    before = library.load()
+    assert library.apply_auto_rule_to_existing(rule_id, files, dry_run=True) == {"matched": 2, "changed": 1}
+    assert library.load() == before
+    assert library.apply_auto_rule_to_existing(rule_id, files, dry_run=False) == {"matched": 2, "changed": 1}
+    assert library.load()["files"]["old.mp4"]["tags"] == ["B站"]
+    assert library.apply_auto_rule_to_existing(rule_id, files, dry_run=False) == {"matched": 2, "changed": 0}
+
+
+def test_kind_rules_can_classify_files_without_records_and_skip_incomplete_ones(library):
+    rule_id = library.change_auto_rule("create", rule=rule("Audio", {"kind": "audio"}, {"favorite": True}))
+    media(library, "loose.mp3")
+    media(library, "part.mp3")
+    library.remember({"part.mp3": {"source_url": "https://e.com", "complete": False}})
+    result = library.apply_auto_rule_to_existing(rule_id, [("loose.mp3", "audio"), ("part.mp3", "audio")],
+                                                 dry_run=False)
+    assert result == {"matched": 1, "changed": 1}
+    assert library.load()["files"]["loose.mp3"] == {"favorite": True}
+
+
+def test_existing_files_need_a_valid_rule(library):
+    with pytest.raises(ValueError, match="no longer exists"):
+        library.apply_auto_rule_to_existing("f" * 32, [], dry_run=True)
+    rule_id = library.change_auto_rule("create", rule=rule())
+    with pytest.raises(ValueError, match="preview or apply"):
+        library.apply_auto_rule_to_existing(rule_id, [], dry_run="yes")
+
+
+def test_existing_files_route_uses_the_current_library(server):
+    (webui.ROOT / "song.mp3").write_bytes(b"x")
+    webui.LIBRARY.remember({"song.mp3": {"source_url": "https://www.bilibili.com/a", "complete": True}})
+    rule_id = call(server, "/api/library/auto-rules", {"action": "create", "rule": rule()})[1]["id"]
+    assert call(server, "/api/library/auto-rules", {"action": "preview_existing", "id": rule_id}) == \
+        (200, {"matched": 1, "changed": 1})
+    assert call(server, "/api/library/auto-rules", {"action": "apply_existing", "id": rule_id})[1]["changed"] == 1
+    assert webui.LIBRARY.load()["files"]["song.mp3"]["tags"] == ["B站"]

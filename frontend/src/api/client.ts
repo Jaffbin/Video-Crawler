@@ -133,6 +133,12 @@ export const changeAutoRule = (
   id?: string,
   rule?: Omit<AutoRule, 'id'>,
 ) => post<{ id: string; auto_rules: AutoRule[] }>('/api/library/auto-rules', { action, id, rule })
+/** Run one rule over files already in the Library; preview first, then apply. */
+export const applyAutoRuleToExisting = (id: string, preview: boolean) =>
+  post<{ matched: number; changed: number }>('/api/library/auto-rules', {
+    action: preview ? 'preview_existing' : 'apply_existing',
+    id,
+  })
 export const getLibraryCheck = () => api<LibraryCheck>('/api/library/organizer')
 export const libraryCheckAction = (action: 'start' | 'cancel') =>
   post<LibraryCheck>('/api/library/organizer', { action })

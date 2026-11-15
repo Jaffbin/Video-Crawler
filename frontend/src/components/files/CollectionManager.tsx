@@ -98,7 +98,13 @@ export function CollectionManager({
           </Button>
         </div>
         {tab === 'auto' ? (
-          <AutoRules files={files} collections={collections} onToast={onToast} onBusyChange={setBusy} />
+          <AutoRules
+            files={files}
+            collections={collections}
+            onToast={onToast}
+            onBusyChange={setBusy}
+            onRefresh={onRefresh}
+          />
         ) : tab === 'smart' ? (
           <SmartCollections
             files={files}

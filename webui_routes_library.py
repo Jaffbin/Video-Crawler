@@ -67,7 +67,11 @@ def library_post(app, h, path: str, body: dict) -> bool:
                 "/api/library/auto-rules"):
         try:
             with app.QUEUE.mutex:
-                if path.endswith("/auto-rules"):
+                if path.endswith("/auto-rules") and body.get("action") in ("preview_existing", "apply_existing"):
+                    files = [(item["path"], item["kind"]) for item in app.list_files(force=True) if item["complete"]]
+                    result = app.LIBRARY.apply_auto_rule_to_existing(
+                        body.get("id"), files, dry_run=body["action"] == "preview_existing")
+                elif path.endswith("/auto-rules"):
                     rule_id = app.LIBRARY.change_auto_rule(body.get("action"), body.get("id"), body.get("rule"))
                     result = {"id": rule_id, "auto_rules": app.LIBRARY.auto_rules()}
                 elif path.endswith("/organize"):

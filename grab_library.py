@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import math
 import os
@@ -146,6 +147,35 @@ class MediaLibrary:
             if applied:
                 self.store.save(data)
             return applied
+
+    def apply_auto_rule_to_existing(self, rule_id, files: list[tuple[str, str]], *, dry_run: bool) -> dict:
+        """Run one rule over files already in the Library, even if it is turned off.
+
+        ``files`` is (path, kind) for each discovered, complete file. Returns how many matched and
+        how many would change (or changed); nothing is written for a dry run or when nothing changes.
+        """
+        if not isinstance(dry_run, bool):
+            raise ValueError("Choose whether to preview or apply.")
+        with self.lock:
+            data = self.load()
+            if not isinstance(rule_id, str) or rule_id not in data["auto_rules"]:
+                raise ValueError("Auto rule no longer exists. Refresh Library.")
+            rule = {**data["auto_rules"][rule_id], "enabled": True}
+            matched = changed = 0
+            for relative, kind in files:
+                current = data["files"].get(relative)
+                record = dict(current) if isinstance(current, dict) else {}
+                if record.get("complete") is False or not grab_auto_rules.matches(rule, relative, record, kind):
+                    continue
+                matched += 1
+                updated = copy.deepcopy(record)
+                grab_auto_rules.apply(rule, updated, data["collections"])
+                if updated != record:
+                    changed += 1
+                    data["files"][relative] = updated
+            if changed and not dry_run:
+                self.store.save(data)
+            return {"matched": matched, "changed": changed}
 
     def change_smart_collection(self, action, name=None, collection_id=None, rules=None) -> str:
         with self.lock:

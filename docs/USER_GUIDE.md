@@ -413,7 +413,12 @@ match; every enabled rule that matches applies. A site also matches its subdomai
 Rules only add classification: they never remove tags, collections or favorites, and never move,
 rename or delete files. They apply to completed downloads when they are saved to the Library, not
 to imported files, files already in the Library or processing-incomplete downloads. The task log
-shows which rules applied. Use **Turn off** to pause a rule without deleting it. A file keeps at
+shows which rules applied.
+
+To classify files you already have, choose **Apply to existing files** on a rule. It first shows
+how many Library files match and how many would change, and changes nothing until you confirm.
+This works even while the rule is turned off. Files without a recorded source (such as files
+copied into the folder by hand) only match rules without a site condition. Use **Turn off** to pause a rule without deleting it. A file keeps at
 most 20 tags. Deleting a manual collection removes it from rules, and a rule left with nothing to
 do is removed. Up to 50 rules can be saved per library.
 

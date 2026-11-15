@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react'
-import { changeAutoRule, getAutoRules } from '../../api/client'
+import { applyAutoRuleToExisting, changeAutoRule, getAutoRules } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
 import { useI18n } from '../../i18n'
 import type { AutoRule, FileItem, LibraryCollection } from '../../types/api'
@@ -67,11 +67,13 @@ export function AutoRules({
   collections,
   onToast,
   onBusyChange,
+  onRefresh,
 }: {
   files: FileItem[]
   collections: LibraryCollection[]
   onToast: ToastFn
   onBusyChange?: (busy: boolean) => void
+  onRefresh?: () => void
 }) {
   const { t } = useI18n()
   const listId = useId()
@@ -79,6 +81,7 @@ export function AutoRules({
   const [draft, setDraft] = useState<Draft>(EMPTY)
   const [editing, setEditing] = useState<string>()
   const [deleting, setDeleting] = useState<AutoRule | null>(null)
+  const [applying, setApplying] = useState<{ rule: AutoRule; matched: number; changed: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -119,7 +122,30 @@ export function AutoRules({
     setDraft(EMPTY)
     setEditing(undefined)
     setDeleting(null)
+    setApplying(null)
     setError('')
+  }
+
+  async function existing(rule: AutoRule, preview: boolean) {
+    setBusy(true)
+    onBusyChange?.(true)
+    setError('')
+    try {
+      const result = await applyAutoRuleToExisting(rule.id, preview)
+      if (preview) {
+        setDeleting(null)
+        setApplying({ rule, ...result })
+      } else {
+        setApplying(null)
+        onRefresh?.()
+        onToast(t('Updated {count} files', { count: result.changed }))
+      }
+    } catch (reason) {
+      setError(t(reason instanceof Error ? reason.message : 'That did not work'))
+    } finally {
+      setBusy(false)
+      onBusyChange?.(false)
+    }
   }
 
   async function send(action: 'create' | 'update' | 'delete', id?: string, rule?: Omit<AutoRule, 'id'>) {
@@ -164,7 +190,7 @@ export function AutoRules({
     <div className="grid gap-4">
       <p className="text-sm text-zinc-400">
         {t(
-          'When a download finishes, every rule whose conditions all match adds its tags, collections or favorite. Files are never moved, and files already in the Library are not changed.',
+          'When a download finishes, every rule whose conditions all match adds its tags, collections or favorite. Files are never moved. To classify files already in the Library, use Apply to existing files.',
         )}
       </p>
       <section className="grid gap-2" aria-label={t('My auto rules')}>
@@ -206,8 +232,16 @@ export function AutoRules({
                 </Button>
                 <Button
                   disabled={busy}
+                  aria-label={t('Apply auto rule {name} to existing files', { name: rule.name })}
+                  onClick={() => void existing(rule, true)}
+                >
+                  {t('Apply to existing files')}
+                </Button>
+                <Button
+                  disabled={busy}
                   aria-label={t('Delete auto rule {name}', { name: rule.name })}
                   onClick={() => {
+                    setApplying(null)
                     setDeleting(rule)
                     setError('')
                   }}
@@ -222,7 +256,39 @@ export function AutoRules({
           ))}
         </ul>
       </section>
-      {deleting ? (
+      {applying ? (
+        <div
+          className="grid gap-3 rounded-xl bg-white/5 p-3"
+          role="region"
+          aria-label={t('Apply to existing files')}
+        >
+          <p className="break-words">
+            {applying.changed
+              ? t(
+                  '{matched} files match {name}; {changed} of them will change. Nothing is removed and no file is moved.',
+                  {
+                    matched: applying.matched,
+                    changed: applying.changed,
+                    name: applying.rule.name,
+                  },
+                )
+              : t('{matched} files match {name}, and all of them already have what it adds.', {
+                  matched: applying.matched,
+                  name: applying.rule.name,
+                })}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={busy} onClick={() => setApplying(null)}>
+              {t('Cancel')}
+            </Button>
+            {applying.changed > 0 && (
+              <Button variant="primary" disabled={busy} onClick={() => void existing(applying.rule, false)}>
+                {t('Update {count} files', { count: applying.changed })}
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : deleting ? (
         <div className="grid gap-3 rounded-xl bg-white/5 p-3">
           <p className="break-words">
             {t('Delete auto rule {name}? Tags and collections it already added are kept.', {

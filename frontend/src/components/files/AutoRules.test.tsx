@@ -126,3 +126,61 @@ it('shows the reason when the app rejects a rule and keeps the form', async () =
   expect(await screen.findByRole('alert')).toHaveTextContent('Enter a site such as bilibili.com.')
   expect(screen.getByLabelText('Rule name')).toHaveValue('Broken')
 })
+
+it('previews applying a rule to existing files before changing anything', async () => {
+  resetTokenCache()
+  const posts: Array<{ action: string; id?: string }> = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body))
+        posts.push(body)
+        return new Response(JSON.stringify({ matched: 5, changed: 3 }))
+      }
+      return new Response(JSON.stringify({ auto_rules: [existing] }))
+    }),
+  )
+  const refresh = vi.fn()
+  const toast = vi.fn()
+  const user = userEvent.setup()
+  render(
+    <AutoRules
+      files={files}
+      collections={[{ id: MUSIC, name: 'Music' }]}
+      onToast={toast}
+      onRefresh={refresh}
+    />,
+  )
+  await user.click(await screen.findByRole('button', { name: 'Apply auto rule Bili to existing files' }))
+  expect(
+    await screen.findByText(
+      '5 files match Bili; 3 of them will change. Nothing is removed and no file is moved.',
+    ),
+  ).toBeInTheDocument()
+  expect(posts).toEqual([{ action: 'preview_existing', id: existing.id }])
+  await user.click(screen.getByRole('button', { name: 'Update 3 files' }))
+  await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+  expect(posts.at(-1)).toEqual({ action: 'apply_existing', id: existing.id })
+  expect(toast).toHaveBeenCalledWith('Updated 3 files')
+  expect(screen.queryByRole('button', { name: 'Update 3 files' })).not.toBeInTheDocument()
+})
+
+it('says when every matching file already has what the rule adds', async () => {
+  resetTokenCache()
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? new Response(JSON.stringify({ matched: 2, changed: 0 }))
+        : new Response(JSON.stringify({ auto_rules: [existing] })),
+    ),
+  )
+  const user = userEvent.setup()
+  renderRules()
+  await user.click(await screen.findByRole('button', { name: 'Apply auto rule Bili to existing files' }))
+  expect(
+    await screen.findByText('2 files match Bili, and all of them already have what it adds.'),
+  ).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Update \d+ files/ })).not.toBeInTheDocument()
+})
