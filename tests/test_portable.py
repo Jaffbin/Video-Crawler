@@ -227,3 +227,25 @@ def test_portable_build_ships_every_local_module_the_app_imports():
     script = (root / "scripts" / "build_portable.ps1").read_text(encoding="utf-8")
     shipped = set(re.findall(r'"([A-Za-z0-9_]+)\.py"', script))
     assert needed - shipped == set()
+
+
+def test_package_install_lists_every_local_module_the_app_imports():
+    """A non-editable pip install only contains the modules named in pyproject.toml."""
+    import tomllib
+
+    root = Path(__file__).resolve().parent.parent
+    local = {path.stem for path in root.glob("*.py")}
+    needed, todo = set(), ["webui", "grab"]
+    while todo:
+        name = todo.pop()
+        if name in needed:
+            continue
+        needed.add(name)
+        for node in ast.walk(ast.parse((root / f"{name}.py").read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                todo += [alias.name.split(".")[0] for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                todo.append(node.module.split(".")[0])
+        todo = [item for item in todo if item in local]
+    listed = set(tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["setuptools"]["py-modules"])
+    assert needed - listed == set()
