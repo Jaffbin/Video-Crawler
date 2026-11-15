@@ -171,6 +171,32 @@ export interface ProbeResult {
   error?: string
 }
 
+export interface TranscriptionItem {
+  status: 'queued' | 'running' | 'done' | 'error' | 'canceled'
+  percent: number
+  error: string
+  language: string
+  seconds?: number
+}
+
+export interface TranscriptionStatus {
+  available: boolean
+  install_hint: string
+  model: string
+  models: string[]
+  items: Record<string, TranscriptionItem>
+  pending: number
+  current: string | null
+}
+
+export interface TranscriptResult {
+  path: string
+  name: string
+  title: string
+  kind: 'audio' | 'video'
+  hits: Array<{ start: number; text: string }>
+}
+
 export interface TimeRange {
   start: string
   end: string

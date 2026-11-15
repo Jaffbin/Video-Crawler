@@ -67,6 +67,8 @@ import webui_routes_jobs  # noqa: E402
 import webui_routes_subscriptions  # noqa: E402
 import webui_routes_system  # noqa: E402
 import webui_routes_api  # noqa: E402
+import webui_routes_transcripts  # noqa: E402
+import grab_transcribe  # noqa: E402
 import grab_api  # noqa: E402
 from grab_subscriptions import (  # noqa: E402
     filter_subscription_entries, normalize_flat_entries, split_backfill, subscription_filter_reason,
@@ -1267,6 +1269,47 @@ def set_extension_access(enabled: bool) -> None:
     store.save({**(data if isinstance(data, dict) else {}), "extension": enabled})
 
 
+# ───────────────────────── Transcription ─────────────────────────
+TRANSCRIBER = grab_transcribe.TranscriptionManager(
+    lambda relative: webui_routes_transcripts.kind_check(sys.modules[__name__], relative),
+    on_done=lambda: bump_rev())
+TRANSCRIPT_INDEX = grab_transcribe.TranscriptIndex(lambda: ROOT / ".grab-transcripts.db")
+
+
+def _transcription_store() -> JsonStore:
+    return JsonStore(lambda: CONFIG_DIR / "transcription.json", SETTINGS_LOCK)
+
+
+def load_transcription_model() -> None:
+    saved = _transcription_store().load({})
+    model = saved.get("model") if isinstance(saved, dict) else None
+    TRANSCRIBER.set_model(model if model in grab_transcribe.MODELS else grab_transcribe.DEFAULT_MODEL)
+
+
+def save_transcription_model(model) -> None:
+    TRANSCRIBER.set_model(model)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _transcription_store().save({"model": model})
+
+
+def search_transcripts(query: str) -> list[dict]:
+    """Refresh the transcript cache from sidecar files, then search it."""
+    files = {item["path"]: item for item in list_files() if item.get("kind") in ("audio", "video")}
+    sidecars = {}
+    for relative in files:
+        transcript = grab_transcribe.sidecar(ROOT / relative)
+        if transcript.is_file():
+            sidecars[relative] = transcript
+    TRANSCRIPT_INDEX.sync(sidecars)
+    results = []
+    for item in TRANSCRIPT_INDEX.search(query):
+        info = files.get(item["path"])
+        if info:
+            results.append({**item, "name": info["name"], "title": info.get("title") or info["name"],
+                            "kind": info["kind"]})
+    return results
+
+
 # ───────────────────────── Automation API ─────────────────────────
 def _api_store() -> JsonStore:
     return JsonStore(lambda: CONFIG_DIR / "api.json", SETTINGS_LOCK)
@@ -1756,6 +1799,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if webui_routes_api.settings_get(sys.modules[__name__], self, u.path):
             return
+        if webui_routes_transcripts.transcripts_get(sys.modules[__name__], self, u.path, q):
+            return
         if self._handle_library_get(u.path):
             return
         if self._handle_jobs_get(u.path, q):
@@ -1816,6 +1861,8 @@ class Handler(BaseHTTPRequestHandler):
         if self._handle_system_post(u.path, body):
             return
         if webui_routes_api.settings_post(sys.modules[__name__], self, u.path, body):
+            return
+        if webui_routes_transcripts.transcripts_post(sys.modules[__name__], self, u.path, body):
             return
 
         self._json({"error": "not found"}, 404)
@@ -1987,6 +2034,8 @@ def main(argv=None) -> None:
     server_thread = threading.Thread(target=srv.serve_forever, name="http-server", daemon=True)
     HOOKS.start()
     load_schedule()
+    load_transcription_model()
+    TRANSCRIBER.start()
     for thread in [*worker_threads, scheduler_thread, server_thread]:
         thread.start()
     try:
@@ -2021,6 +2070,7 @@ def main(argv=None) -> None:
         for thread in [*worker_threads, scheduler_thread, server_thread]:
             thread.join(timeout=2)
         HOOKS.stop()
+        TRANSCRIBER.stop()
         save_history()
 
 

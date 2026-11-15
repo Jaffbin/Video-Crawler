@@ -944,3 +944,26 @@ it('filters pictures, loads lazy thumbnails and opens a recoverable image previe
   await user.keyboard('{Escape}')
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 })
+
+it('queues a transcription from a video’s More menu and offers none for images', async () => {
+  const requests: unknown[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({ added: ['video.mp4'], skipped: [], items: {} }))
+    }),
+  )
+  const toast = vi.fn()
+  const user = userEvent.setup()
+  const image: FileItem = { name: 'photo.jpg', path: 'photo.jpg', size: 5, mtime: 30, kind: 'image' }
+  render(<FileGallery files={[...files, image]} windowMode={false} onRefresh={vi.fn()} onToast={toast} />)
+  await user.click(screen.getByRole('button', { name: 'More actions for photo.jpg' }))
+  expect(screen.queryByRole('button', { name: 'Transcribe photo.jpg' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'More actions for video.mp4' }))
+  await user.click(screen.getByRole('button', { name: 'Transcribe video.mp4' }))
+  await waitFor(() =>
+    expect(toast).toHaveBeenCalledWith('Transcription queued. Open Transcripts to follow it.'),
+  )
+  expect(requests).toEqual([{ action: 'start', paths: ['video.mp4'] }])
+})

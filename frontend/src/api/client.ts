@@ -21,6 +21,8 @@ import type {
   AutoRule,
   DownloadSchedule,
   ScheduleView,
+  TranscriptionStatus,
+  TranscriptResult,
 } from '../types/api'
 import { sanitizeOptions } from '../lib/options'
 import type { BrowserPreferences, BackupReview } from '../lib/backup'
@@ -220,6 +222,19 @@ export const getCookies = () => api<CookieStatus>('/api/cookies')
 export const getAccess = () => api<{ extension: boolean }>('/api/access')
 export const setExtensionAccess = (extension: boolean) =>
   api<{ extension: boolean }>('/api/access', { method: 'POST', body: JSON.stringify({ extension }) })
+export const getTranscription = () => api<TranscriptionStatus>('/api/transcripts')
+export const transcribeFiles = (paths: string[]) =>
+  post<TranscriptionStatus & { added: string[]; skipped: string[] }>('/api/transcripts', {
+    action: 'start',
+    paths,
+  })
+export const cancelTranscription = () => post<TranscriptionStatus>('/api/transcripts', { action: 'cancel' })
+export const setTranscriptionModel = (model: string) =>
+  post<TranscriptionStatus>('/api/transcripts', { action: 'model', model })
+export const searchTranscripts = (query: string) =>
+  api<{ query: string; results: TranscriptResult[] }>(
+    `/api/transcripts/search?q=${encodeURIComponent(query)}`,
+  )
 export interface AutomationApiStatus {
   enabled: boolean
   has_token: boolean

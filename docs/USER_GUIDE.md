@@ -652,6 +652,31 @@ Telegram and ntfy receive only the title, the video title or link, and for failu
 **Send a test notification** in Settings checks every channel even while `enabled` is false.
 Settings shows only each channel's type and host; addresses and tokens never leave the file.
 
+## Transcripts and searching what was said
+
+Video Grabber can turn speech in Library videos and audio into text on this computer, then search
+it. This optional feature needs faster-whisper:
+
+```bash
+python -m pip install -e ".[ai]"
+```
+
+Restart the app afterwards. The portable Windows build does not include it.
+
+Choose **More → Transcribe** on a video or audio file. Open **Transcripts** in Library to follow
+progress, stop transcribing, choose the speech model and search. Results list each matching
+moment; select a time to play the file from there. Search matches any part of the text, so Chinese
+and Japanese work without spaces between words.
+
+- **Models**: `tiny`, `base`, `small` (default), `medium` and `large-v3-turbo`. Larger models are
+  more accurate and slower. The first use downloads the chosen model once (about 75 MB to 1.6 GB)
+  from Hugging Face; after that, transcription works offline. A GPU is used when available.
+- **Files**: each transcript is saved next to its media as `<name>.transcript.srt`, so any video
+  player can show it as subtitles. It is renamed and moved to Recovery together with its media.
+  Transcribing a file again replaces only this file. The search index (`.grab-transcripts.db` in the
+  download folder) is rebuilt from these files when needed.
+- Files are transcribed one at a time in the background and never slow downloads down.
+
 ## Automation API
 
 Programs on this computer (a script, AutoHotkey, Raycast, n8n desktop) can add downloads and read

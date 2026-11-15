@@ -2177,6 +2177,55 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Auto rules': ['自动规则', '自動規則', '自動ルール'],
   'Download schedule': ['下载时间表', '下載時間表', 'ダウンロードスケジュール'],
   'Automation API': ['自动化 API', '自動化 API', '自動化 API'],
+  Transcripts: ['转录', '轉錄', '文字起こし'],
+  Transcribe: ['转录为文字', '轉錄為文字', '文字起こし'],
+  'Transcribe {name}': ['把 {name} 转录为文字', '把 {name} 轉錄為文字', '{name} を文字起こし'],
+  'Transcription queued. Open Transcripts to follow it.': [
+    '已加入转录队列。打开「转录」查看进度。',
+    '已加入轉錄佇列。開啟「轉錄」查看進度。',
+    '文字起こしを予約しました。「文字起こし」で進行状況を確認できます。',
+  ],
+  'This file is already being transcribed.': [
+    '这个文件已经在转录中。',
+    '這個檔案已經在轉錄中。',
+    'このファイルはすでに文字起こし中です。',
+  ],
+  'Install transcription support: pip install -e ".[ai]", then restart Video Grabber.': [
+    '请先安装转录组件：pip install -e ".[ai]"，然后重启 Video Grabber。',
+    '請先安裝轉錄元件：pip install -e ".[ai]"，然後重新啟動 Video Grabber。',
+    '文字起こし機能をインストールしてください：pip install -e ".[ai]" を実行し、Video Grabber を再起動します。',
+  ],
+  'Choose Transcribe in a video or audio file’s More menu. Speech is recognized on this computer, and the transcript is saved next to the file.':
+    [
+      '在视频或音频文件的「更多」菜单中选择「转录为文字」。语音在这台电脑上识别，文字稿保存在文件旁边。',
+      '在影片或音訊檔案的「更多」選單中選擇「轉錄為文字」。語音在這台電腦上辨識，文字稿儲存在檔案旁邊。',
+      '動画・音声ファイルの「その他」メニューで「文字起こし」を選びます。音声はこのコンピューターで認識され、テキストはファイルの隣に保存されます。',
+    ],
+  'Search what was said': ['搜索说过的话', '搜尋說過的話', '話された内容を検索'],
+  Search: ['搜索', '搜尋', '検索'],
+  'Search results': ['搜索结果', '搜尋結果', '検索結果'],
+  'No transcript mentions this.': [
+    '没有文字稿提到这个内容。',
+    '沒有文字稿提到這個內容。',
+    'この内容に触れた文字起こしはありません。',
+  ],
+  'Play {name} from {time}': ['从 {time} 播放 {name}', '從 {time} 播放 {name}', '{name} を {time} から再生'],
+  'Transcription progress': ['转录进度', '轉錄進度', '文字起こしの進行状況'],
+  'Stop transcribing': ['停止转录', '停止轉錄', '文字起こしを停止'],
+  'Transcription stopped': ['已停止转录', '已停止轉錄', '文字起こしを停止しました'],
+  'Transcribing {percent}%': ['转录中 {percent}%', '轉錄中 {percent}%', '文字起こし中 {percent}%'],
+  Waiting: ['等待中', '等待中', '待機中'],
+  'Speech model': ['语音模型', '語音模型', '音声モデル'],
+  'Larger models are more accurate but slower. The first use downloads the model once.': [
+    '模型越大越准确，但速度越慢。第一次使用时会下载一次模型。',
+    '模型越大越準確，但速度越慢。第一次使用時會下載一次模型。',
+    '大きいモデルほど正確ですが遅くなります。初回のみモデルをダウンロードします。',
+  ],
+  'Only audio and video can be transcribed.': [
+    '只能转录音频和视频。',
+    '只能轉錄音訊和影片。',
+    '文字起こしできるのは音声と動画だけです。',
+  ],
   'Lets programs on this computer, such as scripts or n8n, add downloads and check their progress. They can only choose the format and quality; cookies, proxies, folders and your Library stay out of reach. Programs on other devices cannot connect.':
     [
       '让这台电脑上的程序（例如脚本或 n8n）添加下载并查看进度。它们只能选择格式和画质，无法接触 cookie、代理、下载文件夹和媒体库。其他设备上的程序无法连接。',

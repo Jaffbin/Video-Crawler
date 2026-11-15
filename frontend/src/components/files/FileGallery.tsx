@@ -1,6 +1,7 @@
 import {
   Ellipsis,
   Download,
+  FileText,
   ExternalLink,
   FolderOpen,
   Image as ImageIcon,
@@ -29,6 +30,7 @@ import {
   purgeFile,
   trashFile,
   organizeFiles,
+  transcribeFiles,
 } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
 import { formatBytes, formatDate, formatDuration } from '../../lib/utils'
@@ -40,6 +42,7 @@ import { MediaArtwork } from './MediaArtwork'
 import { MediaDetails } from './MediaDetails'
 import { LibraryFilters } from './LibraryFilters'
 import { LibraryOrganizer } from './LibraryOrganizer'
+import { Transcripts } from './Transcripts'
 import { displayFilename, fileKind, filterLibrary, type LibrarySort } from '../../lib/library'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
@@ -494,6 +497,7 @@ export function FileGallery({
           </div>
           <div className="compact-actions library-tools flex flex-wrap gap-2">
             <ImportFiles onRefresh={onRefresh} onToast={onToast} />
+            <Transcripts files={files} onToast={onToast} />
             <CollectionManager
               collections={collections}
               files={files}
@@ -972,6 +976,30 @@ export function FileGallery({
                     <a className="action-btn" href={fileUrl(f.path)} download={f.name}>
                       <Download aria-hidden size={13} /> {t('Download')}
                     </a>
+                    {fileKind(f) !== 'image' && f.complete !== false && (
+                      <button
+                        className="action-btn"
+                        aria-label={t('Transcribe {name}', { name: f.name })}
+                        onClick={() => {
+                          setPopup(null)
+                          transcribeFiles([f.path])
+                            .then((result) =>
+                              onToast(
+                                t(
+                                  result.added.length
+                                    ? 'Transcription queued. Open Transcripts to follow it.'
+                                    : 'This file is already being transcribed.',
+                                ),
+                              ),
+                            )
+                            .catch((e: unknown) =>
+                              onToast(t(e instanceof Error ? e.message : 'That did not work'), true),
+                            )
+                        }}
+                      >
+                        <FileText aria-hidden size={13} /> {t('Transcribe')}
+                      </button>
+                    )}
 
                     <button
                       type="button"
