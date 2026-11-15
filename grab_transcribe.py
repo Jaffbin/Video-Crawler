@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import subprocess
 import threading
 import time
 from typing import Callable
@@ -150,22 +151,88 @@ class TranscriptIndex:
 
 
 # ── Background work ──
-def whisper_transcriber(model_name: str):
-    """Load faster-whisper once per model; returns transcribe(path, progress, cancelled)."""
-    from faster_whisper import WhisperModel  # Optional dependency, imported only when used.
+SAMPLE_RATE = 16000  # what Whisper models expect
 
-    model = WhisperModel(model_name, device="auto", compute_type="int8")
+
+def ffmpeg_executable() -> str:
+    import grab  # The app's own ffmpeg lookup, so Diagnostics and transcription agree.
+
+    location = grab.ffmpeg_location()
+    path = Path(location) if location else None
+    if path and path.is_dir():
+        path /= "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    if not path or not path.is_file():
+        raise RuntimeError("ffmpeg was not found. Open Diagnostics to set it up.")
+    return str(path)
+
+
+def decode_audio(path: Path, ffmpeg: str):
+    """Mono 16 kHz float samples via ffmpeg.
+
+    faster-whisper's own decoder relies on PyAV, whose API changes between releases (PyAV 19 broke
+    faster-whisper 1.2); the app already requires ffmpeg, so decoding here keeps transcription working.
+    """
+    import numpy  # Installed with faster-whisper.
+
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    result = subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-i", str(path), "-map", "0:a:0", "-ac", "1",
+                             "-ar", str(SAMPLE_RATE), "-f", "s16le", "-"],
+                            capture_output=True, check=False, creationflags=flags)
+    if result.returncode:
+        detail = result.stderr.decode("utf-8", "replace").strip().splitlines()
+        if any("matches no streams" in line for line in detail):
+            raise RuntimeError("This file has no audio to transcribe.")
+        raise RuntimeError("Could not read the audio: " + (detail[-1] if detail else f"ffmpeg exit {result.returncode}"))
+    if not result.stdout:
+        raise RuntimeError("This file has no audio to transcribe.")
+    return numpy.frombuffer(result.stdout, numpy.int16).astype(numpy.float32) / 32768.0
+
+
+GPU_RUNTIME_ERROR = re.compile(r"cublas|cudnn|cuda|cudart", re.IGNORECASE)
+
+
+def is_gpu_runtime_error(error: Exception) -> bool:
+    """An NVIDIA GPU was found but its CUDA libraries are missing, a common setup on Windows."""
+    return isinstance(error, (RuntimeError, OSError)) and bool(GPU_RUNTIME_ERROR.search(str(error)))
+
+
+def run_model(model, audio, progress, cancelled):
+    segments, info = model.transcribe(audio, vad_filter=True)
+    result = []
+    for segment in segments:  # A generator: the model runs while we iterate.
+        if cancelled():
+            raise Cancelled
+        result.append((segment.start, segment.end, segment.text))
+        if info.duration:
+            progress(min(99.0, segment.end / info.duration * 100))
+    return result, info.language
+
+
+def whisper_transcriber(model_name: str, model_factory=None):
+    """Load faster-whisper once per model; returns transcribe(path, progress, cancelled).
+
+    Uses a GPU when one works. If CUDA libraries are missing, the first failure switches to the CPU
+    for good and redoes that file, instead of failing every transcription.
+    """
+    if model_factory is None:
+        from faster_whisper import WhisperModel  # Optional dependency, imported only when used.
+
+        def model_factory(device):
+            return WhisperModel(model_name, device=device, compute_type="int8")
+    state = {"device": "auto", "model": model_factory("auto")}
+    ffmpeg = ffmpeg_executable()
 
     def transcribe(path: Path, progress: Callable[[float], None], cancelled: Callable[[], bool]):
-        segments, info = model.transcribe(str(path), vad_filter=True)
-        result = []
-        for segment in segments:  # A generator: decoding happens while we iterate.
-            if cancelled():
-                raise Cancelled
-            result.append((segment.start, segment.end, segment.text))
-            if info.duration:
-                progress(min(99.0, segment.end / info.duration * 100))
-        return result, info.language
+        audio = decode_audio(path, ffmpeg)
+        try:
+            return run_model(state["model"], audio, progress, cancelled)
+        except Exception as error:  # noqa: BLE001 - re-raised unless it is a missing GPU runtime
+            if state["device"] == "cpu" or not is_gpu_runtime_error(error):
+                raise
+            LOG.warning("GPU transcription is unavailable (%s); using the CPU instead.", error)
+            state.update(device="cpu", model=model_factory("cpu"))
+            progress(0)
+            return run_model(state["model"], audio, progress, cancelled)
     return transcribe
 
 

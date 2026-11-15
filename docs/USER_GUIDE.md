@@ -670,7 +670,11 @@ and Japanese work without spaces between words.
 
 - **Models**: `tiny`, `base`, `small` (default), `medium` and `large-v3-turbo`. Larger models are
   more accurate and slower. The first use downloads the chosen model once (about 75 MB to 1.6 GB)
-  from Hugging Face; after that, transcription works offline. A GPU is used when available.
+  from Hugging Face; after that, transcription works offline. An NVIDIA GPU is used when its CUDA
+  libraries are installed; otherwise transcription runs on the CPU automatically. Audio is read with
+  the same ffmpeg the app uses for downloads.
+- Chinese transcripts are often written in Traditional characters. Search matches the exact
+  characters, so try the Traditional form (for example 安裝 rather than 安装) if a search finds nothing.
 - **Files**: each transcript is saved next to its media as `<name>.transcript.srt`, so any video
   player can show it as subtitles. It is renamed and moved to Recovery together with its media.
   Transcribing a file again replaces only this file. The search index (`.grab-transcripts.db` in the

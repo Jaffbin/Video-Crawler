@@ -258,3 +258,83 @@ def test_routes_transcribe_search_and_save_the_model(server, monkeypatch):
 def webui_routes_kind(relative):
     import webui_routes_transcripts
     return webui_routes_transcripts.kind_check(webui, relative)
+
+
+# ── Real audio decoding and device fallback (regressions found with the real model) ──
+def test_audio_is_decoded_with_ffmpeg_not_pyav(tmp_path):
+    from conftest import FFMPEG_EXE, HAVE_FFMPEG
+    import subprocess
+
+    if not HAVE_FFMPEG:
+        pytest.skip("ffmpeg is not installed")
+    clip = tmp_path / "tone.mp4"
+    subprocess.run([str(FFMPEG_EXE), "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                    "-c:a", "aac", str(clip)], check=True)
+    samples = tr.decode_audio(clip, str(FFMPEG_EXE))
+    assert abs(len(samples) - tr.SAMPLE_RATE) < tr.SAMPLE_RATE * 0.1  # about one second, mono 16 kHz
+    assert samples.dtype.name == "float32" and 0.05 < float(abs(samples).max()) <= 1.0
+    silent_video = tmp_path / "picture.mp4"
+    subprocess.run([str(FFMPEG_EXE), "-loglevel", "error", "-f", "lavfi", "-i", "color=size=64x64:duration=1",
+                    "-pix_fmt", "yuv420p", str(silent_video)], check=True)
+    with pytest.raises(RuntimeError, match="no audio"):
+        tr.decode_audio(silent_video, str(FFMPEG_EXE))
+    with pytest.raises(RuntimeError, match="Could not read the audio"):
+        tr.decode_audio(tmp_path / "missing.mp4", str(FFMPEG_EXE))
+
+
+class FakeSegment:
+    def __init__(self, start, end, text):
+        self.start, self.end, self.text = start, end, text
+
+
+class FakeInfo:
+    duration = 4.0
+    language = "en"
+
+
+def test_a_missing_cuda_runtime_falls_back_to_the_cpu_once(monkeypatch):
+    import numpy
+
+    monkeypatch.setattr(tr, "ffmpeg_executable", lambda: "ffmpeg")
+    monkeypatch.setattr(tr, "decode_audio", lambda path, ffmpeg: numpy.zeros(10, numpy.float32))
+    built = []
+
+    class GpuModel:
+        def transcribe(self, audio, vad_filter):
+            def segments():
+                raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+                yield
+            return segments(), FakeInfo()
+
+    class CpuModel:
+        def transcribe(self, audio, vad_filter):
+            return iter([FakeSegment(0, 2, "hello")]), FakeInfo()
+
+    def factory(device):
+        built.append(device)
+        return GpuModel() if device == "auto" else CpuModel()
+
+    transcribe = tr.whisper_transcriber("tiny", model_factory=factory)
+    progress = []
+    assert transcribe("a.wav", progress.append, lambda: False) == ([(0, 2, "hello")], "en")
+    assert transcribe("b.wav", progress.append, lambda: False) == ([(0, 2, "hello")], "en")
+    assert built == ["auto", "cpu"] and progress[0] == 0
+
+
+def test_other_model_errors_are_not_hidden_by_the_fallback(monkeypatch):
+    import numpy
+
+    monkeypatch.setattr(tr, "ffmpeg_executable", lambda: "ffmpeg")
+    monkeypatch.setattr(tr, "decode_audio", lambda path, ffmpeg: numpy.zeros(10, numpy.float32))
+
+    class Broken:
+        def transcribe(self, audio, vad_filter):
+            raise ValueError("bad input")
+
+    built = []
+    transcribe = tr.whisper_transcriber("tiny", model_factory=lambda device: built.append(device) or Broken())
+    with pytest.raises(ValueError, match="bad input"):
+        transcribe("a.wav", lambda p: None, lambda: False)
+    assert built == ["auto"]
+    assert tr.is_gpu_runtime_error(OSError("cudnn_ops64_9.dll missing"))
+    assert not tr.is_gpu_runtime_error(RuntimeError("out of memory"))
