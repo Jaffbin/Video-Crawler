@@ -13,15 +13,20 @@ from grab_models import Job, Subscription
 class DownloadQueue(queue.Queue):
     """Pause and reorder only pending work; claiming a job is atomic with controls."""
 
+    # A schedule hold ends when the clock reaches the window, which nothing notifies, so a waiting
+    # worker re-checks at least this often.
+    HOLD_RECHECK_SECONDS = 15.0
+
     def __init__(self):
         super().__init__()
         self.paused = False
         self.stopping = False
+        self.hold = lambda: False  # True while the download schedule keeps pending work waiting
 
     def get(self, block=True, timeout=None):
         with self.not_empty:
             deadline = None if timeout is None else time.monotonic() + timeout
-            while self.paused or not self._qsize():
+            while self.paused or not self._qsize() or self.hold():
                 if self.stopping:
                     raise queue.Empty
                 if not block:
@@ -29,6 +34,8 @@ class DownloadQueue(queue.Queue):
                 remaining = None if deadline is None else deadline - time.monotonic()
                 if remaining is not None and remaining <= 0:
                     raise queue.Empty
+                if not self.paused and self._qsize():
+                    remaining = min(remaining or self.HOLD_RECHECK_SECONDS, self.HOLD_RECHECK_SECONDS)
                 self.not_empty.wait(remaining)
             if self.stopping:
                 raise queue.Empty
@@ -46,6 +53,11 @@ class DownloadQueue(queue.Queue):
     def stop(self) -> None:
         with self.not_empty:
             self.stopping = True
+            self.not_empty.notify_all()
+
+    def wake(self) -> None:
+        """Re-check the schedule now, for example after it was changed."""
+        with self.not_empty:
             self.not_empty.notify_all()
 
     def pending_ids(self) -> list[str]:

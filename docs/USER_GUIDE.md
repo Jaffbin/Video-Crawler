@@ -212,6 +212,22 @@ subscriptions support MP4, MP3 and source audio.
 
 ## Manage the queue
 
+### Download schedule
+
+Choose **Download schedule** in Queue to decide when downloads start:
+
+- **Only start downloads during these hours** keeps queued tasks waiting outside the window, for
+  example 23:00 to 07:00 (a window may cross midnight). Queue shows when they will start.
+- **Limit speed during busy hours** gives downloads that start in those hours a speed limit, such
+  as `2M` or `500K`. A task's own speed limit always wins.
+
+Only the start of a task is scheduled. A download that is already running continues at its
+original speed until it finishes, and **Pause queue** still stops new tasks at any time. Times use
+this computer's clock. The schedule is saved in the settings folder (`schedule.json`) and is not
+part of backups.
+
+### Existing files and the queue
+
 New download, Quick download and the Chrome extension check for existing complete files before
 adding tasks. You can open the saved files, open Library, use the existing downloads, or download
 another copy. Other new links in a batch are still added. Copies receive a separate filename;

@@ -19,6 +19,8 @@ import type {
   HooksStatus,
   NotificationTestResponse,
   AutoRule,
+  DownloadSchedule,
+  ScheduleView,
 } from '../types/api'
 import { sanitizeOptions } from '../lib/options'
 import type { BrowserPreferences, BackupReview } from '../lib/backup'
@@ -106,6 +108,7 @@ export const clearJobs = () => post<{ ok: boolean }>('/api/clear')
 export const batchJobs = (ids: string[], action: 'cancel' | 'retry' | 'remove') =>
   post<{ processed: string[]; skipped: string[] }>('/api/jobs/batch', { ids, action })
 export const pauseQueue = (paused: boolean) => post<{ paused: boolean }>('/api/queue', { paused })
+export const saveSchedule = (schedule: DownloadSchedule) => post<ScheduleView>('/api/schedule', { schedule })
 export const moveJob = (id: string, direction: 'up' | 'down') =>
   post<{ ok: boolean }>(`/api/jobs/${id}/move-${direction}`)
 export const renameFile = (path: string, name: string) =>

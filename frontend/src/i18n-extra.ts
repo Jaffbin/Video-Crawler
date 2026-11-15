@@ -2175,6 +2175,62 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'That did not work': ['操作失败', '操作失敗', '操作に失敗'],
   'After downloads': ['下载之后', '下載之後', 'ダウンロード後'],
   'Auto rules': ['自动规则', '自動規則', '自動ルール'],
+  'Download schedule': ['下载时间表', '下載時間表', 'ダウンロードスケジュール'],
+  'Download schedule saved': [
+    '下载时间表已保存',
+    '下載時間表已儲存',
+    'ダウンロードスケジュールを保存しました',
+  ],
+  'Queued downloads wait for the download window and start at {time}.': [
+    '排队中的下载会等到下载时段，于 {time} 开始。',
+    '佇列中的下載會等到下載時段，於 {time} 開始。',
+    '待機中のダウンロードはダウンロード時間帯まで待ち、{time} に開始します。',
+  ],
+  'Busy hours: new downloads are limited to {rate}/s.': [
+    '忙碌时段：新开始的下载限速为 {rate}/s。',
+    '忙碌時段：新開始的下載限速為 {rate}/s。',
+    '混雑時間帯：新しいダウンロードは {rate}/s に制限されます。',
+  ],
+  'The schedule decides when queued downloads start. Downloads that are already running continue unchanged.':
+    [
+      '时间表决定排队中的下载何时开始。已经在进行的下载不受影响。',
+      '時間表決定佇列中的下載何時開始。已經在進行的下載不受影響。',
+      'スケジュールは待機中のダウンロードの開始時刻を決めます。実行中のダウンロードはそのまま続きます。',
+    ],
+  'Use a download schedule': ['使用下载时间表', '使用下載時間表', 'ダウンロードスケジュールを使う'],
+  'Only start downloads during these hours': [
+    '只在这段时间开始下载',
+    '只在這段時間開始下載',
+    'この時間帯だけダウンロードを開始',
+  ],
+  From: ['从', '從', '開始'],
+  Until: ['到', '到', '終了'],
+  'Limit speed during busy hours': ['忙碌时段限速', '忙碌時段限速', '混雑時間帯は速度を制限'],
+  'Busy from': ['忙碌时段从', '忙碌時段從', '混雑開始'],
+  'Busy until': ['忙碌时段到', '忙碌時段到', '混雑終了'],
+  'Speed limit': ['速度上限', '速度上限', '速度上限'],
+  'Applies to downloads that start during busy hours and have no speed limit of their own. Examples: 2M, 500K.':
+    [
+      '适用于在忙碌时段开始、且本身没有设置限速的下载。例如：2M、500K。',
+      '適用於在忙碌時段開始、且本身沒有設定限速的下載。例如：2M、500K。',
+      '混雑時間帯に開始し、個別の速度制限がないダウンロードに適用されます。例：2M、500K。',
+    ],
+  'Save schedule': ['保存时间表', '儲存時間表', 'スケジュールを保存'],
+  'Enter the start time as HH:MM, for example 23:00.': [
+    '请用 HH:MM 格式输入开始时间，例如 23:00。',
+    '請用 HH:MM 格式輸入開始時間，例如 23:00。',
+    '開始時刻は 23:00 のように HH:MM で入力してください。',
+  ],
+  'Choose a download window, a speed limit, or both.': [
+    '请选择下载时段、限速，或两者都选。',
+    '請選擇下載時段、限速，或兩者都選。',
+    'ダウンロード時間帯、速度制限、またはその両方を選んでください。',
+  ],
+  'Enter a speed such as 2M or 500K.': [
+    '请输入速度，例如 2M 或 500K。',
+    '請輸入速度，例如 2M 或 500K。',
+    '2M や 500K のように速度を入力してください。',
+  ],
   'Auto rules updated': ['自动规则已更新', '自動規則已更新', '自動ルールを更新しました'],
   'When a download finishes, every rule whose conditions all match adds its tags, collections or favorite. Files are never moved. To classify files already in the Library, use Apply to existing files.':
     [

@@ -2,9 +2,10 @@ import { ArrowDown, ArrowUp, Pause, Play, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { batchJobs, clearJobs, moveJob, pauseQueue } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
-import type { Job } from '../../types/api'
+import type { Job, ScheduleView } from '../../types/api'
 import { Button } from '../ui/Button'
 import { JobCard } from './JobCard'
+import { ScheduleControl, ScheduleNotice } from './ScheduleControl'
 import { useI18n } from '../../i18n'
 import { SelectionScope } from '../ui/SelectionScope'
 
@@ -52,6 +53,7 @@ interface Props {
   queuePaused?: boolean
   queueOrder?: string[]
   onNewDownload?: () => void
+  schedule?: ScheduleView
 }
 
 export function QueuePanel({
@@ -63,6 +65,7 @@ export function QueuePanel({
   queuePaused = false,
   queueOrder = [],
   onNewDownload,
+  schedule,
 }: Props) {
   const { t } = useI18n()
   const [query, setQuery] = useState('')
@@ -138,6 +141,7 @@ export function QueuePanel({
               {queuePaused ? <Play aria-hidden size={14} /> : <Pause aria-hidden size={14} />}
               {t(queuePaused ? 'Resume queue' : 'Pause queue')}
             </Button>
+            <ScheduleControl schedule={schedule} onChanged={onChanged} onToast={onToast} />
             {successRate !== null && (
               <div
                 className="rounded-xl bg-emerald-500/[.08] px-3 py-1.5 text-xs text-emerald-200"
@@ -152,6 +156,7 @@ export function QueuePanel({
           </div>
         </div>
 
+        <ScheduleNotice schedule={schedule} />
         <div className="flex flex-wrap gap-2">
           <label className="relative min-w-0 flex-1 basis-48">
             <span className="sr-only">{t('Search downloads')}</span>

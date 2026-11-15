@@ -171,7 +171,26 @@ export interface ProbeResult {
   error?: string
 }
 
+export interface TimeRange {
+  start: string
+  end: string
+}
+
+export interface DownloadSchedule {
+  enabled: boolean
+  window: TimeRange | null
+  limit: (TimeRange & { rate: string }) | null
+}
+
+/** The saved schedule plus whether it is holding queued tasks right now. */
+export interface ScheduleView extends DownloadSchedule {
+  holding: boolean
+  next_start: number | null
+  limit_active: string | null
+}
+
 export interface StateResponse {
+  schedule?: ScheduleView
   version: string
   ffmpeg: boolean
   playwright: boolean

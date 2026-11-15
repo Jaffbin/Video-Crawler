@@ -11,6 +11,9 @@ import re
 
 
 def jobs_get(app, h, path: str, q: dict) -> bool:
+    if path == "/api/schedule":
+        h._json(app.schedule_view())
+        return True
     if path == "/api/state":
         views = [job.view(app.ROOT) for job in app.JOB_MANAGER.snapshot(newest_first=True)]
         try:
@@ -21,6 +24,7 @@ def jobs_get(app, h, path: str, q: dict) -> bool:
                 "playwright": importlib.util.find_spec("playwright") is not None,
                 "root": str(app.ROOT), "rev": app.FILES_REV, "jobs": views,
                 "queue_paused": app.QUEUE.paused, "queue_order": app.QUEUE.pending_ids(),
+                "schedule": app.schedule_view(),
                 "window": app.WINDOW_MODE, "desktop_notifications": app.desktop_notifications_supported()}
         if app.WINDOW_MODE and app.NATIVE_DESKTOP is not None:
             data["native_notifications"] = {"enabled": app.NATIVE_DESKTOP.notifications_enabled,
@@ -73,6 +77,15 @@ def jobs_post(app, h, path: str, body: dict) -> bool:
             h._json({"ids": ids, "duplicates": len(pending) - len(ids), "skipped_existing": len(skipped)})
             return True
         h._json({"ids": ids, "duplicates": len(urls) - len(ids)})
+        return True
+
+    if path == "/api/schedule":
+        try:
+            h._json(app.save_schedule(body.get("schedule")))
+        except ValueError as error:
+            h._json({"error": str(error)}, 400)
+        except OSError:
+            h._json({"error": "Could not save the download schedule."}, 500)
         return True
 
     if path == "/api/queue":

@@ -329,6 +329,7 @@ function AppContent() {
             jobs={jobs}
             queuePaused={state.queue_paused}
             queueOrder={state.queue_order}
+            schedule={state.schedule}
             onNewDownload={() => navigate('new')}
             windowMode={!!state.window}
             onChanged={refresh}

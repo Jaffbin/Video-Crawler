@@ -22,6 +22,7 @@ Notes
 """
 from __future__ import annotations
 
+import datetime
 import hmac
 import http.cookies
 import importlib.metadata
@@ -58,6 +59,7 @@ from grab_repair import repair, repair_options  # noqa: E402
 from grab_archive import seed_archive  # noqa: E402
 from grab_hooks import HookRunner, ensure_config_file, load_config  # noqa: E402
 import grab_push  # noqa: E402
+import grab_schedule  # noqa: E402
 from grab_errors import error_details, fmt_eta, fmt_speed, friendly_error, strip_ansi  # noqa: E402
 import grab_cookies  # noqa: E402
 import webui_routes_library  # noqa: E402
@@ -314,6 +316,11 @@ def run_job(job: Job) -> None:
     if "_repair_path" in job.options:
         return run_repair_job(job)
     args = make_args(job.options)
+    busy_rate = grab_schedule.rate_limit(SCHEDULE, datetime.datetime.now())
+    if busy_rate and not args.limit_rate:
+        # A task's own limit wins; otherwise busy hours apply for this whole download.
+        args.limit_rate = busy_rate
+        job.log.append(f"[Schedule] Speed limited to {busy_rate}/s during busy hours")
     # A differently configured task may have finished while this one was waiting.
     copy_download = job.options.get("_download_copy") is True or any(
         item["profile_known"] and not item["settings_match"]
@@ -1258,6 +1265,37 @@ def set_extension_access(enabled: bool) -> None:
     store.save({**(data if isinstance(data, dict) else {}), "extension": enabled})
 
 
+# ───────────────────────── Download schedule ─────────────────────────
+SCHEDULE = dict(grab_schedule.DEFAULT)
+
+
+def _schedule_store() -> JsonStore:
+    return JsonStore(lambda: CONFIG_DIR / "schedule.json", SETTINGS_LOCK)
+
+
+def load_schedule() -> None:
+    SCHEDULE.clear()
+    SCHEDULE.update(grab_schedule.load(_schedule_store().load(None)))
+    QUEUE.wake()
+
+
+def save_schedule(value) -> dict:
+    checked = grab_schedule.checked(value)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _schedule_store().save(checked)
+    SCHEDULE.clear()
+    SCHEDULE.update(checked)
+    QUEUE.wake()
+    return schedule_view()
+
+
+def schedule_view() -> dict:
+    return grab_schedule.view(SCHEDULE, datetime.datetime.now())
+
+
+QUEUE.hold = lambda: not grab_schedule.may_start(SCHEDULE, datetime.datetime.now())
+
+
 # ───────────────────────── Download hooks ─────────────────────────
 HOOKS = HookRunner(lambda: CONFIG_DIR / "hooks.json")
 
@@ -1903,6 +1941,7 @@ def main(argv=None) -> None:
     )
     server_thread = threading.Thread(target=srv.serve_forever, name="http-server", daemon=True)
     HOOKS.start()
+    load_schedule()
     for thread in [*worker_threads, scheduler_thread, server_thread]:
         thread.start()
     try:
