@@ -448,7 +448,8 @@ class MediaLibrary:
                 if isinstance(info.get("download_profile"), dict):
                     data["files"][relative]["download_profile"] = {
                         key: value for key, value in info["download_profile"].items()
-                        if key in {"mode", "quality", "abr", "subs", "sub_langs", "auto_subs", "embed_subs", "cover", "keep_cover"}
+                        if key in {"mode", "quality", "abr", "subs", "sub_langs", "auto_subs", "embed_subs", "cover", "keep_cover",
+                                   "sponsorblock", "split_chapters"}
                         and isinstance(value, (str, int, bool))
                     }
                 if isinstance(info.get("repair_options"), dict):

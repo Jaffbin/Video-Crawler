@@ -24,6 +24,8 @@ export const DEFAULT_OPTIONS: DownloadOptions = {
   embed_subs: false,
   cover: false,
   keep_cover: false,
+  sponsorblock: '',
+  split_chapters: false,
   no_playlist: false,
   items: '',
   archive: false,
@@ -61,6 +63,8 @@ export function sanitizeOptions(input: Partial<DownloadOptions>): DownloadOption
     js_wait: clamp(o.js_wait, 2, 30, DEFAULT_OPTIONS.js_wait),
     cookies_from_browser: BROWSERS.includes(o.cookies_from_browser) ? o.cookies_from_browser : '',
     use_cookies_file: Boolean(o.use_cookies_file),
+    sponsorblock: o.sponsorblock === 'mark' || o.sponsorblock === 'remove' ? o.sponsorblock : '',
+    split_chapters: o.split_chapters === true,
   }
 }
 

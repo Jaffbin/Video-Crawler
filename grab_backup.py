@@ -21,7 +21,7 @@ BACKUP_MAX_BYTES = 16 * 1024**2
 LOG = logging.getLogger(__name__)
 OUTPUT_DEFAULTS = {"mode": "mp4", "quality": "best", "abr": 192, "subs": False,
                    "sub_langs": "zh-Hans,zh-Hant,zh,en", "auto_subs": False, "embed_subs": False,
-                   "cover": False, "keep_cover": False}
+                   "cover": False, "keep_cover": False, "sponsorblock": "", "split_chapters": False}
 
 
 def checked_text(value, limit, empty=True):
@@ -46,6 +46,8 @@ def output_options(value):
         elif key == "sub_langs":
             checked_text(item, 200)
             valid = True
+        elif key == "sponsorblock":
+            valid = item in ("", "mark", "remove")
         else:
             valid = isinstance(item, bool)
         if not valid:

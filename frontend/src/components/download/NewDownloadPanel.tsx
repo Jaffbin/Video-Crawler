@@ -453,6 +453,41 @@ export function NewDownloadPanel({
             </details>
           )}
 
+          {!picture && (
+            <details className="download-extras">
+              <summary>{t('Chapters and sponsored segments')}</summary>
+              <div className="mt-3 grid gap-2">
+                <label className="control">
+                  <span>{t('Sponsored segments (YouTube)')}</span>
+                  <select
+                    className="field"
+                    value={options.sponsorblock}
+                    onChange={(e) =>
+                      patch({ sponsorblock: e.target.value as DownloadOptions['sponsorblock'] })
+                    }
+                  >
+                    <option value="">{t('Keep everything')}</option>
+                    <option value="mark">{t('Mark them as chapters')}</option>
+                    <option value="remove">{t('Remove sponsors, self-promotion and reminders')}</option>
+                  </select>
+                </label>
+                {options.sponsorblock && (
+                  <p className="text-xs text-zinc-400">
+                    {t(
+                      'Segments come from the community SponsorBlock database. Only a short hash of the video ID is sent to it, never your account or files.',
+                    )}
+                  </p>
+                )}
+                <Toggle checked={options.split_chapters} onChange={(v) => patch({ split_chapters: v })}>
+                  {t('Also save one file per chapter')}
+                </Toggle>
+                <p className="text-xs text-zinc-400">
+                  {t('Chapters are always kept in the file when the site provides them.')}
+                </p>
+              </div>
+            </details>
+          )}
+
           {selectedPlaylist?.length === 0 && (
             <p role="alert" className="text-xs text-amber-200">
               {t('Select at least one playlist entry.')}
@@ -479,6 +514,9 @@ export function NewDownloadPanel({
             <p className="mt-1 text-zinc-400">
               {[
                 options.subs && !mp3 ? t('Subtitles included') : '',
+                options.sponsorblock === 'remove' ? t('Sponsors removed') : '',
+                options.sponsorblock === 'mark' ? t('Sponsors marked') : '',
+                options.split_chapters ? t('Split by chapter') : '',
                 !mp3 || (options.cover && !originalAudio) ? t('Cover embedded') : '',
                 !mp3 || (options.cover && (options.keep_cover || originalAudio))
                   ? t('Separate cover included')

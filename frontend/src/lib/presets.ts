@@ -12,6 +12,8 @@ export const OUTPUT_KEYS = [
   'embed_subs',
   'cover',
   'keep_cover',
+  'sponsorblock',
+  'split_chapters',
 ] as const
 export type OutputOptions = Pick<DownloadOptions, (typeof OUTPUT_KEYS)[number]>
 export interface DownloadPreset {

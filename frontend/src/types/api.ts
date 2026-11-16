@@ -11,6 +11,9 @@ export interface DownloadOptions {
   embed_subs: boolean
   cover: boolean
   keep_cover: boolean
+  /** YouTube only: '' keeps everything, 'mark' adds chapters, 'remove' cuts sponsor segments. */
+  sponsorblock: '' | 'mark' | 'remove'
+  split_chapters: boolean
   no_playlist: boolean
   items: string
   archive: boolean

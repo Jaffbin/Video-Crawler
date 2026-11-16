@@ -195,6 +195,9 @@ def make_args(o: dict):
     a.cover = a.mode == "mp4" or bool(o.get("cover"))
     a.keep_cover = a.mode in ("mp4", "original") or bool(o.get("keep_cover"))
     a.no_playlist = bool(o.get("no_playlist"))
+    media_mode = a.mode in ("mp4", "mp3", "original")
+    a.sponsorblock = o.get("sponsorblock") if media_mode and o.get("sponsorblock") in ("mark", "remove") else ""
+    a.split_chapters = media_mode and o.get("split_chapters") is True
     items = str(o.get("items") or "").strip()
     a.items = items if re.fullmatch(r"[\d,\-:]+", items) else None
     # Video and audio keep separate skip lists, so having a video as MP3 never hides it from an MP4 request.
@@ -230,6 +233,11 @@ def make_args(o: dict):
 
 def download_profile(args) -> dict:
     profile = {"mode": args.mode}
+    # Only recorded when used, so earlier downloads keep matching the same settings.
+    if getattr(args, "sponsorblock", ""):
+        profile["sponsorblock"] = args.sponsorblock
+    if getattr(args, "split_chapters", False):
+        profile["split_chapters"] = True
     if args.mode == "mp4":
         profile.update(quality=args.quality, subs=args.subs, embed_subs=args.embed_subs)
         if args.subs or args.embed_subs:
@@ -314,6 +322,25 @@ def _library_file_is_complete(relative: str) -> bool:
         return LIBRARY.media_path(relative).stat().st_size > 0
     except (OSError, ValueError):
         return False
+
+
+def track_chapter_files(job: Job) -> None:
+    """Record split chapters with their source, so Library knows where they came from."""
+    for path in list(job.seen_paths):
+        source = Path(path)
+        folder = grab.chapter_folder(source)
+        if not folder.is_dir() or source.suffix.lower() not in MEDIA_SUFFIX - IMAGE_SUFFIXES:
+            continue
+        info = job.media_metadata.get(path, {})
+        for chapter in sorted(folder.iterdir()):
+            if chapter.suffix.lower() in MEDIA_SUFFIX - IMAGE_SUFFIXES and str(chapter) not in job.seen_paths:
+                job.seen_paths.append(str(chapter))
+                job.media_metadata[str(chapter)] = {
+                    "source_url": info.get("source_url") or job.url,
+                    "title": f"{info.get('title') or job.title} - {chapter.stem}",
+                    "role": "media", "complete": True,
+                    "download_profile": info.get("download_profile"),
+                }
 
 
 def run_job(job: Job) -> None:
@@ -470,7 +497,13 @@ def run_job(job: Job) -> None:
         try:
             opts = grab.build_opts(args, referer, name, work)
             if copy_download:
-                opts["outtmpl"] = opts["outtmpl"].replace(".%(ext)s", f" [copy-{job.work_key}].%(ext)s")
+                copy = f" [copy-{job.work_key}]"
+                if isinstance(opts["outtmpl"], dict):
+                    opts["outtmpl"] = {"default": opts["outtmpl"]["default"].replace(".%(ext)s", copy + ".%(ext)s"),
+                                       "chapter": opts["outtmpl"]["chapter"].replace(
+                                           grab.CHAPTER_FOLDER_SUFFIX + "/", copy + grab.CHAPTER_FOLDER_SUFFIX + "/")}
+                else:
+                    opts["outtmpl"] = opts["outtmpl"].replace(".%(ext)s", copy + ".%(ext)s")
             opts.update(extra)
             with cookie_copy(args) as cookiefile:
                 if cookiefile:
@@ -516,6 +549,8 @@ def run_job(job: Job) -> None:
     else:
         ok = grab.discover_and_download(job.url, args, download_one, log, set_title, check)
 
+    if args.split_chapters:
+        track_chapter_files(job)
     job.files = [p for p in job.seen_paths if Path(p).suffix.lower() in MEDIA_SUFFIX and Path(p).exists()]
     records = {}
     for path in job.files:

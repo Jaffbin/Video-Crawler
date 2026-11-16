@@ -79,6 +79,8 @@ export function QuickDownload({ root, online }: { root: string; online: boolean 
                 embed_subs: false,
                 cover: false,
                 keep_cover: false,
+                sponsorblock: '' as const,
+                split_chapters: false,
               },
             }
       const result = await createJobs(request.urls, request.options, action)

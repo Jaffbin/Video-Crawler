@@ -184,6 +184,17 @@ def video_format(quality: str) -> str:
     )
 
 
+# SponsorBlock categories. Removal stays conservative: intros, outros and previews can carry real content.
+SPONSORBLOCK_REMOVE = ("sponsor", "selfpromo", "interaction")
+SPONSORBLOCK_MARK = ("sponsor", "intro", "outro", "selfpromo", "preview", "filler", "interaction", "music_offtopic")
+CHAPTER_FOLDER_SUFFIX = " chapters"
+
+
+def chapter_folder(media: Path) -> Path:
+    """Where split chapters of ``media`` are saved: a folder named after the full file."""
+    return media.with_name(media.stem + CHAPTER_FOLDER_SUFFIX)
+
+
 def build_opts(args, referer: str | None = None, name: str | None = None, work_dir: Path | None = None) -> dict:
     out = Path(args.output).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -193,10 +204,16 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
 
     if name:  # Direct links from page scan: name with page title
         safe = sanitize_filename(name)[:120].replace("%", "%%") or "video"
-        tmpl = f"{base}/{safe}.%(ext)s"
+        stem = f"{base}/{safe}"
     else:     # Playlists automatically create subfolders and numbers
-        tmpl = (f"{base}/%(playlist_title|)s/"
-                "%(playlist_index&{:02d}. |)s%(title).120B [%(id)s].%(ext)s")
+        stem = (f"{base}/%(playlist_title|)s/"
+                "%(playlist_index&{:02d}. |)s%(title).120B [%(id)s]")
+    tmpl = stem + ".%(ext)s"
+    split_chapters = getattr(args, "split_chapters", False) and args.mode in ("mp4", "mp3", "original")
+    if split_chapters:
+        # Chapter files sit in a folder named after the full file, which is kept as well.
+        tmpl = {"default": tmpl,
+                "chapter": stem + CHAPTER_FOLDER_SUFFIX + "/%(section_number)02d. %(section_title).80B.%(ext)s"}
 
     opts: dict = {
         **js_runtime_opts(),
@@ -218,6 +235,11 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
         return opts
 
     pps: list[dict] = []
+    sponsorblock = getattr(args, "sponsorblock", "") if args.mode in ("mp4", "mp3", "original") else ""
+    if sponsorblock in ("mark", "remove"):
+        # Only YouTube videos have SponsorBlock data; other sites are left unchanged.
+        pps.append({"key": "SponsorBlock", "when": "after_filter",
+                    "categories": set(SPONSORBLOCK_REMOVE if sponsorblock == "remove" else SPONSORBLOCK_MARK)})
 
     # Covers / Subtitles: convert to common format first
     if args.cover and args.mode in ("mp4", "mp3", "original"):
@@ -242,10 +264,17 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
         if args.embed_subs:
             pps.append({"key": "FFmpegEmbedSubtitle", "already_have_subtitle": True})
 
+    if sponsorblock in ("mark", "remove"):
+        # Must run before FFmpegMetadata, which writes the resulting chapters into the file.
+        pps.append({"key": "ModifyChapters", "remove_chapters_patterns": [],
+                    "remove_sponsor_segments": set(SPONSORBLOCK_REMOVE) if sponsorblock == "remove" else set(),
+                    "sponsorblock_chapter_title": "[SponsorBlock]: %(category_names)l", "force_keyframes": False})
     if args.mode in ("mp4", "mp3", "original"):
         pps.append({"key": "FFmpegMetadata", "add_chapters": True, "add_metadata": True})
     if args.cover and args.mode in ("mp4", "mp3"):
         pps.append({"key": "EmbedThumbnail", "already_have_thumbnail": args.keep_cover})
+    if split_chapters:
+        pps.append({"key": "FFmpegSplitChapters", "force_keyframes": False})
     opts["postprocessors"] = pps
     if args.mode == "cover":
         opts.update(skip_download=True, writethumbnail=True, ignore_no_formats_error=True,

@@ -186,6 +186,22 @@ apply to the current link and are cleared when it changes or is submitted.
 Analysis does not download media, but it connects to the source site. It uses the configured
 proxy, cookies and Referer. An analysis failure does not guarantee that download will fail.
 
+## Chapters and sponsored segments
+
+Video and audio downloads keep the site's chapters inside the file when it provides them. Open
+**Chapters and sponsored segments** in New download for two more choices:
+
+- **Also save one file per chapter** keeps the full file and adds a `<name> chapters` folder next to
+  it with `01. <chapter title>`, `02. …` files. They appear in Library with the same source.
+- **Sponsored segments (YouTube)** uses the community SponsorBlock database. **Mark them as
+  chapters** adds chapters such as "[SponsorBlock]: Sponsor" without changing the video. **Remove
+  sponsors, self-promotion and reminders** cuts those segments out; intros, outros and previews are
+  kept because they often contain real content. Cuts happen at the nearest keyframe, so a fraction
+  of a second may remain. To look up segments, only a short hash of the video ID is sent to the
+  SponsorBlock server, never your account, cookies or files. Other sites are not affected.
+
+Both settings are remembered, can be saved in presets and are included in backups.
+
 ## Download covers and images
 
 Choose **Video cover** for a video page supported by yt-dlp. The app extracts its thumbnail URLs

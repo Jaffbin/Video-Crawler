@@ -36,6 +36,8 @@ access controls.
 - Choose MP3 Highest quality (320 kbps), Standard quality (192 kbps), Save space (128 kbps), or a custom bitrate.
 - Keep the best available source audio without re-encoding; its file format depends on the source.
 - Download subtitles and cover art.
+- Keep chapters, optionally save one file per chapter, and mark or remove YouTube sponsor segments
+  with SponsorBlock (off by default).
 - Save only a video's cover, or download a direct JPG, PNG, WebP, GIF or AVIF URL in its original format.
 - Filter images in Library and preview them at a fitted or original size; manage them with rename and recovery.
 - Preview titles, thumbnails, duration and available resolutions before downloading; select playlist entries.
