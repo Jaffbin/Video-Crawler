@@ -45,3 +45,48 @@ it('names what YouTube is missing instead of a generic message', () => {
   rerender(<Banners {...base} showYoutubeIssues youtubeIssueIds={[]} />)
   expect(screen.getByText(/Some site download features need preparation/)).toBeInTheDocument()
 })
+
+it('asks for fresh YouTube cookies after a sign-in expires and can be dismissed', async () => {
+  const fix = vi.fn()
+  const dismiss = vi.fn()
+  const user = userEvent.setup()
+  const { rerender } = render(
+    <Banners
+      online
+      ffmpeg
+      showYoutubeIssues={false}
+      onOpenDiagnostics={vi.fn()}
+      onDismissYoutubeIssues={vi.fn()}
+      signinAlert={{ browser: false }}
+      onFixSignin={fix}
+      onDismissSignin={dismiss}
+    />,
+  )
+  expect(screen.getByRole('status')).toHaveTextContent('no longer accepts your uploaded cookies.txt')
+  await user.click(screen.getByRole('button', { name: 'Open cookie settings' }))
+  await user.click(screen.getByRole('button', { name: 'Dismiss' }))
+  expect(fix).toHaveBeenCalledOnce()
+  expect(dismiss).toHaveBeenCalledOnce()
+  rerender(
+    <Banners
+      online
+      ffmpeg
+      showYoutubeIssues={false}
+      onOpenDiagnostics={vi.fn()}
+      onDismissYoutubeIssues={vi.fn()}
+      signinAlert={{ browser: true }}
+    />,
+  )
+  expect(screen.getByRole('status')).toHaveTextContent('Sign in to YouTube in that browser again')
+  rerender(
+    <Banners
+      online
+      ffmpeg
+      showYoutubeIssues={false}
+      onOpenDiagnostics={vi.fn()}
+      onDismissYoutubeIssues={vi.fn()}
+      signinAlert={null}
+    />,
+  )
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+})

@@ -304,13 +304,39 @@ class HookRunner:
                 continue
             kind, args = item
             try:
-                (self.run_now if kind == "program" else self.notify_now)(*args)
+                {"program": self.run_now, "notification": self.notify_now, "alert": self.alert_now}[kind](*args)
             except Exception as error:  # noqa: BLE001
                 # One broken item must not stop this thread, or every later hook would silently never run.
                 LOG.exception("Download %s failed unexpectedly", kind)
-                self._record(args[0], args[1], "failed", None, 0.0, f"Unexpected error: {error}", kind=kind)
+                self._record(args[0], args[1] if kind != "alert" else "", "failed", None, 0.0,
+                             f"Unexpected error: {error}", kind="program" if kind == "program" else "notification")
             finally:
                 self._pending.task_done()
+
+    def send_alert(self, event: str, title: str, body: str) -> bool:
+        """Queue an app alert (not tied to one download) to channels that receive failures."""
+        if self._stop.is_set():
+            return False
+        config = load_config(self.config_path())
+        if not config["enabled"] or config["error"]:
+            return False
+        payload = {"version": 1, "event": event}
+        queued = False
+        for channel in config["notifications"]:
+            if "download_failed" in channel["events"]:
+                try:
+                    self._pending.put_nowait(("alert", (event, channel, title, body, payload)))
+                    queued = True
+                except queue.Full:
+                    self._record(event, "", "skipped", None, 0.0, "Too many were waiting; this one was skipped.",
+                                 kind="notification", target=grab_push.target_label(channel))
+        return queued
+
+    def alert_now(self, event: str, channel: dict, title: str, body: str, payload: dict) -> None:
+        started = time.monotonic()
+        reason = self._send(channel, title, body, payload)
+        self._record(event, "", "failed" if reason else "ok", None, time.monotonic() - started, reason,
+                     kind="notification", target=grab_push.target_label(channel))
 
     def notify_now(self, event: str, job_id: str, channel: dict, payload: dict, language: str) -> None:
         title, body = grab_push.message(event, payload, language)

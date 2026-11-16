@@ -109,6 +109,7 @@ export const jobAction = (id: string, action: 'cancel' | 'retry' | 'remove') =>
 export const clearJobs = () => post<{ ok: boolean }>('/api/clear')
 export const batchJobs = (ids: string[], action: 'cancel' | 'retry' | 'remove') =>
   post<{ processed: string[]; skipped: string[] }>('/api/jobs/batch', { ids, action })
+export const dismissSigninAlert = () => post<{ signin_alert: null }>('/api/signin-alert/dismiss')
 export const pauseQueue = (paused: boolean) => post<{ paused: boolean }>('/api/queue', { paused })
 export const saveSchedule = (schedule: DownloadSchedule) => post<ScheduleView>('/api/schedule', { schedule })
 export const moveJob = (id: string, direction: 'up' | 'down') =>

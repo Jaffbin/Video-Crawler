@@ -615,6 +615,7 @@ def worker(stop_event: threading.Event | None = None) -> None:
             bump_rev()
             save_history()
             dispatch_download_hooks(job)
+            update_signin_alert(job)
             QUEUE.task_done()
 
 
@@ -1280,12 +1281,52 @@ def cookies_status() -> dict:
 def save_cookies(text: str) -> dict:
     result = grab_cookies.save_cookies(text, cookies_path())
     DOCTOR_CACHE["ts"] = 0.0
+    clear_signin_alert()
     return result
 
 
 def delete_cookies() -> None:
     grab_cookies.delete_cookies(cookies_path())
     DOCTOR_CACHE["ts"] = 0.0
+    clear_signin_alert()
+
+
+# YouTube signed out the cookies this app uses: shown app-wide until fixed, dismissed or proven working.
+SIGNIN_ALERT: dict | None = None
+
+
+def _is_youtube(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host in ("youtu.be", "youtube.com") or host.endswith(".youtube.com")
+
+
+def clear_signin_alert() -> None:
+    global SIGNIN_ALERT
+    if SIGNIN_ALERT is not None:
+        SIGNIN_ALERT = None
+        bump_rev()
+
+
+def update_signin_alert(job: Job) -> None:
+    """Raise the alert when YouTube rejects the cookies of a task that used them; clear it on success."""
+    global SIGNIN_ALERT
+    used_cookies = job.options.get("use_cookies_file") is True or bool(job.options.get("cookies_from_browser"))
+    if not used_cookies or not _is_youtube(job.url):
+        return
+    # yt-dlp may finish the download without the rejected cookies, so a rotation note counts too.
+    rotated = job.error_kind == "cookies_expired" or "rotated" in job._note_keys
+    if rotated:
+        if SIGNIN_ALERT is None:
+            SIGNIN_ALERT = {"since": time.time(), "browser": bool(job.options.get("cookies_from_browser"))}
+            bump_rev()
+            # Once per alert, so a run of failing tasks does not flood the channels.
+            try:
+                language = load_config(HOOKS.config_path())["language"]
+                HOOKS.send_alert("signin_expired", *grab_push.signin_message(language))
+            except Exception:  # noqa: BLE001
+                logging.getLogger(__name__).exception("Could not queue the sign-in notification")
+    elif job.status == "done":
+        clear_signin_alert()
 
 
 def cookie_copy(args):

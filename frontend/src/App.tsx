@@ -49,7 +49,7 @@ import { useI18n } from './i18n'
 import { useTheme } from './hooks/useTheme'
 import { useDesktopLocale } from './lib/desktop'
 import { CloseBehavior } from './components/layout/CloseBehavior'
-import { setNativeNotifications } from './api/client'
+import { dismissSigninAlert, setNativeNotifications } from './api/client'
 import { browserPreferences } from './lib/backup'
 import { AudioPlayerBar, AudioPlayerProvider, useAudioLibrary } from './components/audio/AudioPlayer'
 
@@ -301,6 +301,9 @@ function AppContent() {
           onDismissUpdate={environment.dismissUpdate}
           onOpenDiagnostics={() => setDoctorOpen(true)}
           onDismissYoutubeIssues={environment.dismiss}
+          signinAlert={state.signin_alert}
+          onFixSignin={() => navigate('new')}
+          onDismissSignin={() => void dismissSigninAlert().then(() => refresh())}
         />
       </div>
 

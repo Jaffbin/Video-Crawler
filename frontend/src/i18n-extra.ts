@@ -2206,6 +2206,19 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Split by chapter': ['按章节拆分', '按章節拆分', 'チャプターごとに分割'],
   'Save only a part': ['只保存一段', '只儲存一段', '一部分だけ保存'],
   'Automatic transcription': ['自动转录', '自動轉錄', '自動文字起こし'],
+  'YouTube signed out the browser cookies used for downloads. Sign in to YouTube in that browser again, then retry.':
+    [
+      'YouTube 已让下载所用的浏览器 cookie 失效。请在该浏览器中重新登录 YouTube，然后重试。',
+      'YouTube 已讓下載所用的瀏覽器 cookie 失效。請在該瀏覽器中重新登入 YouTube，然後重試。',
+      'ダウンロードに使うブラウザーの Cookie が YouTube によって無効になりました。そのブラウザーで YouTube に再ログインしてから再試行してください。',
+    ],
+  'YouTube no longer accepts your uploaded cookies.txt. Export a fresh one from a private window and upload it.':
+    [
+      'YouTube 不再接受你上传的 cookies.txt。请在无痕窗口中导出新的文件并重新上传。',
+      'YouTube 不再接受你上傳的 cookies.txt。請在無痕視窗中匯出新的檔案並重新上傳。',
+      'アップロードした cookies.txt が YouTube で使えなくなりました。プライベートウィンドウで新しく書き出してアップロードしてください。',
+    ],
+  'Open cookie settings': ['打开 cookie 设置', '開啟 cookie 設定', 'Cookie 設定を開く'],
   'Transcribe new video and audio downloads automatically': [
     '自动转录新下载的视频和音频',
     '自動轉錄新下載的影片和音訊',

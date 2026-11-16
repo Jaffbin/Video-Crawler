@@ -140,6 +140,20 @@ def message(event: str, payload: dict, language: str) -> tuple[str, str]:
     return title, body
 
 
+SIGNIN_COPY = {
+    "en": ("YouTube sign-in expired", "YouTube no longer accepts the cookies Video Grabber uses. "
+           "Export a fresh cookies.txt and upload it in Advanced settings."),
+    "zh-CN": ("YouTube 登录已失效", "YouTube 不再接受 Video Grabber 使用的 cookie。请导出新的 cookies.txt 并在高级设置中上传。"),
+    "zh-TW": ("YouTube 登入已失效", "YouTube 不再接受 Video Grabber 使用的 cookie。請匯出新的 cookies.txt 並在進階設定中上傳。"),
+    "ja": ("YouTube のログインが切れました", "YouTube が Video Grabber の Cookie を受け付けなくなりました。"
+           "新しい cookies.txt を書き出し、詳細設定でアップロードしてください。"),
+}
+
+
+def signin_message(language: str) -> tuple[str, str]:
+    return SIGNIN_COPY.get(language, SIGNIN_COPY["en"])
+
+
 def test_message(language: str) -> tuple[str, str]:
     text = COPY.get(language, COPY["en"])
     return text[2], text[3]

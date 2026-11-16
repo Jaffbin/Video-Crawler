@@ -24,7 +24,7 @@ def jobs_get(app, h, path: str, q: dict) -> bool:
                 "playwright": importlib.util.find_spec("playwright") is not None,
                 "root": str(app.ROOT), "rev": app.FILES_REV, "jobs": views,
                 "queue_paused": app.QUEUE.paused, "queue_order": app.QUEUE.pending_ids(),
-                "schedule": app.schedule_view(),
+                "schedule": app.schedule_view(), "signin_alert": app.SIGNIN_ALERT,
                 "window": app.WINDOW_MODE, "desktop_notifications": app.desktop_notifications_supported()}
         if app.WINDOW_MODE and app.NATIVE_DESKTOP is not None:
             data["native_notifications"] = {"enabled": app.NATIVE_DESKTOP.notifications_enabled,
@@ -84,6 +84,11 @@ def jobs_post(app, h, path: str, body: dict) -> bool:
             h._json({"ids": ids, "duplicates": len(pending) - len(ids), "skipped_existing": len(skipped)})
             return True
         h._json({"ids": ids, "duplicates": len(urls) - len(ids)})
+        return True
+
+    if path == "/api/signin-alert/dismiss":
+        app.clear_signin_alert()
+        h._json({"signin_alert": None})
         return True
 
     if path == "/api/schedule":

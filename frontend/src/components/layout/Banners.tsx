@@ -15,6 +15,10 @@ interface Props {
   onDismissUpdate?: () => void
   onOpenDiagnostics: () => void
   onDismissYoutubeIssues: () => void
+  /** YouTube rejected the cookies downloads use; browser is true when cookies come from a browser. */
+  signinAlert?: { browser: boolean } | null
+  onFixSignin?: () => void
+  onDismissSignin?: () => void
 }
 
 export function Banners({
@@ -29,6 +33,9 @@ export function Banners({
   onDismissUpdate,
   onOpenDiagnostics,
   onDismissYoutubeIssues,
+  signinAlert,
+  onFixSignin,
+  onDismissSignin,
 }: Props) {
   const { t } = useI18n()
   return (
@@ -47,6 +54,32 @@ export function Banners({
           <Button variant="ghost" onClick={onOpenSetup || onOpenDiagnostics}>
             {t('Prepare download features')}
           </Button>
+        </div>
+      )}
+      {online && signinAlert && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-center gap-3 border-b border-amber-400/10 bg-amber-400/[.06] px-4 py-2 text-sm text-amber-200"
+        >
+          <span>
+            {signinAlert.browser
+              ? t(
+                  'YouTube signed out the browser cookies used for downloads. Sign in to YouTube in that browser again, then retry.',
+                )
+              : t(
+                  'YouTube no longer accepts your uploaded cookies.txt. Export a fresh one from a private window and upload it.',
+                )}
+          </span>
+          {onFixSignin && (
+            <Button variant="ghost" className="!py-1" onClick={onFixSignin}>
+              {t('Open cookie settings')}
+            </Button>
+          )}
+          {onDismissSignin && (
+            <Button variant="ghost" className="!py-1" onClick={onDismissSignin}>
+              {t('Dismiss')}
+            </Button>
+          )}
         </div>
       )}
       {online && onUpdate && (updateVersion || updateNeedsRestart) && (

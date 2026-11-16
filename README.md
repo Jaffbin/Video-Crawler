@@ -68,6 +68,8 @@ access controls.
 - Use a dedicated public-download-page fallback for `hanime1.me`; use yt-dlp's native Iwara extractor
   with browser impersonation support.
 - Diagnose ffmpeg, yt-dlp, Deno, Playwright, cookies and network problems from the UI.
+- Get an app-wide reminder (and a message on configured notification channels) when YouTube stops
+  accepting the cookies your downloads use; it clears after new cookies or a working download.
 - Run in a native pywebview window, a normal browser tab, or directly from the CLI.
 
 </details>

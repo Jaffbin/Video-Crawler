@@ -226,6 +226,8 @@ export interface ScheduleView extends DownloadSchedule {
 
 export interface StateResponse {
   schedule?: ScheduleView
+  /** YouTube rejected the cookies a download used; shown until fixed or dismissed. */
+  signin_alert?: { since: number; browser: boolean } | null
   version: string
   ffmpeg: boolean
   playwright: boolean
