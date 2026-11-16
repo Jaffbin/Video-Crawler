@@ -98,7 +98,6 @@ const messages: Record<Locale, Record<string, string>> = {
     'Settings saved': '设置已保存',
     'No subscriptions yet. Add a channel or playlist link above to have new videos download automatically.':
       '暂无订阅。请在上方添加频道或播放列表链接，以自动下载新视频。',
-    '{count}, checked every {minutes} min': '{count} 个，每 {minutes} 分钟检查一次',
     Failed: '失败',
     'Suggested fix': '建议处理',
     Retry: '重试',
@@ -226,7 +225,6 @@ const messages: Record<Locale, Record<string, string>> = {
     'Settings saved': '設定已儲存',
     'No subscriptions yet. Add a channel or playlist link above to have new videos download automatically.':
       '尚無訂閱。請在上方新增頻道或播放清單連結，以自動下載新影片。',
-    '{count}, checked every {minutes} min': '{count} 個，每 {minutes} 分鐘檢查一次',
     Failed: '失敗',
     'Suggested fix': '建議處理',
     Retry: '重試',
@@ -358,7 +356,6 @@ const messages: Record<Locale, Record<string, string>> = {
     'Settings saved': '設定を保存しました',
     'No subscriptions yet. Add a channel or playlist link above to have new videos download automatically.':
       '購読はまだありません。上でチャンネルまたはプレイリストを追加してください。',
-    '{count}, checked every {minutes} min': '{count} 件、{minutes} 分ごとに確認',
     Failed: '失敗',
     'Suggested fix': '推奨される対処',
     Retry: '再試行',

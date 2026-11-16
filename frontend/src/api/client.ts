@@ -275,6 +275,8 @@ export const setNativeNotifications = (enabled: boolean) =>
   post<{ ok: boolean }>('/api/desktop/notifications', { enabled })
 
 export const getSubscriptions = () => api<SubscriptionsResponse>('/api/subscriptions')
+export const saveSubscriptionInterval = (intervalMinutes: number) =>
+  post<{ interval_seconds: number }>('/api/subscriptions/settings', { interval_minutes: intervalMinutes })
 export const addSubscription = (
   url: string,
   options: DownloadOptions,

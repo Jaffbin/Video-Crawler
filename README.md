@@ -150,7 +150,9 @@ Run `python webui.py --help` for all options (download folder, port, worker coun
 `--sub-interval` for how often subscriptions are re-checked).
 
 **Subscriptions**: add a channel or playlist link in the "Subscriptions" panel to have new videos
-download automatically (checked every 60 minutes by default). New subscriptions only grab videos
+download automatically. They are checked every 60 minutes by default; change this with **Check for
+new videos every** (30 minutes to 24 hours), which overrides `--sub-interval` and is remembered.
+Checking less often lowers the chance of rate limits from the site. New subscriptions only grab videos
 published from then on unless you choose to also back-fill a recent batch when adding one. Filters
 are stored per subscription. Duration filters apply only when the site exposes duration metadata;
 items filtered out are marked as seen so they are not repeatedly reconsidered on every check. Each

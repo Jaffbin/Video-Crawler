@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { saveSubscriptionInterval } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
 import type { DownloadOptions, Subscription } from '../../types/api'
 import { AddSubscriptionForm } from './AddSubscriptionForm'
@@ -8,6 +10,7 @@ interface Props {
   options: DownloadOptions
   subscriptions: Subscription[]
   intervalSeconds: number
+  intervalChoices?: number[]
   onChanged: () => void
   onToast: ToastFn
 }
@@ -16,23 +19,53 @@ export function SubscriptionsPanel({
   options,
   subscriptions = [],
   intervalSeconds,
+  intervalChoices = [30, 60, 120, 360, 720, 1440],
   onChanged,
   onToast,
 }: Props) {
   const { t } = useI18n()
+  const [saving, setSaving] = useState(false)
+  const minutes = Math.round(intervalSeconds / 60)
+  const choices = intervalChoices.includes(minutes)
+    ? intervalChoices
+    : [...intervalChoices, minutes].sort((a, b) => a - b)
+
+  async function changeInterval(value: number) {
+    setSaving(true)
+    try {
+      await saveSubscriptionInterval(value)
+      onChanged()
+      onToast(t('Check frequency saved'))
+    } catch (error) {
+      onToast(t(error instanceof Error ? error.message : 'That did not work'), true)
+    } finally {
+      setSaving(false)
+    }
+  }
   return (
     <section className="card grid content-start gap-4" aria-labelledby="subs-title">
-      <div>
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <h2 id="subs-title" className="text-lg font-semibold">
           {t('Auto-download')}
-          <span className="ml-2 text-sm font-normal text-zinc-400">
-            {subscriptions.length > 0 &&
-              t('{count}, checked every {minutes} min', {
-                count: subscriptions.length,
-                minutes: Math.round(intervalSeconds / 60),
-              })}
-          </span>
+          {subscriptions.length > 0 && (
+            <span className="ml-2 text-sm font-normal text-zinc-400">{subscriptions.length}</span>
+          )}
         </h2>
+        <label className="control min-w-0 basis-44">
+          <span>{t('Check for new videos every')}</span>
+          <select
+            className="field"
+            value={minutes}
+            disabled={saving}
+            onChange={(event) => void changeInterval(Number(event.target.value))}
+          >
+            {choices.map((choice) => (
+              <option key={choice} value={choice}>
+                {choice < 60 ? t('{count} min', { count: choice }) : t('{count} h', { count: choice / 60 })}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <AddSubscriptionForm options={options} onAdded={onChanged} onToast={onToast} />

@@ -204,3 +204,25 @@ def test_routes_read_save_and_reject_a_schedule(server):
     assert call(server, "/api/state")[1]["schedule"]["limit"]["rate"] == "2M"
     status, body = call(server, "/api/schedule", {"schedule": {"enabled": True}})
     assert status == 400 and "window" in body["error"]
+
+
+# ── Subscription check frequency ──
+def test_check_frequency_is_saved_validated_and_wins_over_the_default(app, monkeypatch):
+    monkeypatch.setattr(app, "SUB_INTERVAL_SECONDS", 3600)
+    assert app.load_subscription_interval(1800) == 1800  # nothing saved: the --sub-interval default
+    assert app.save_subscription_interval(360) == 21600 and app.SUB_INTERVAL_SECONDS == 21600
+    assert app.load_subscription_interval(300) == 21600
+    for bad in (5, 45, "60", True, None):
+        with pytest.raises(ValueError, match="how often"):
+            app.save_subscription_interval(bad)
+    (app.CONFIG_DIR / "subscription-settings.json").write_text('{"interval_minutes": 1}', encoding="utf-8")
+    assert app.load_subscription_interval(3600) == 3600  # an unexpected saved value is ignored
+
+
+def test_check_frequency_routes(server, monkeypatch):
+    monkeypatch.setattr(webui, "SUB_INTERVAL_SECONDS", 3600)
+    status, body = call(server, "/api/subscriptions")
+    assert status == 200 and body["interval_seconds"] == 3600 and body["interval_choices_minutes"][0] == 30
+    assert call(server, "/api/subscriptions/settings", {"interval_minutes": 120}) == (200, {"interval_seconds": 7200})
+    assert call(server, "/api/subscriptions")[1]["interval_seconds"] == 7200
+    assert call(server, "/api/subscriptions/settings", {"interval_minutes": 10})[0] == 400

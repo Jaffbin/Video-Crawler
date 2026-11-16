@@ -12,12 +12,25 @@ def subscriptions_get(app, h, path: str) -> bool:
     if path == "/api/subscriptions":
         subs = app.SUBSCRIPTION_MANAGER.snapshot(newest_first=True)
         h._json({"subscriptions": [app.subscription_view(s) for s in subs],
-                    "interval_seconds": app.SUB_INTERVAL_SECONDS})
+                    "interval_seconds": app.SUB_INTERVAL_SECONDS,
+                    "interval_choices_minutes": list(app.SUB_INTERVAL_CHOICES_MINUTES)})
         return True
     return False
 
 
 def subscriptions_post(app, h, path: str, body: dict) -> bool:
+    if path == "/api/subscriptions/settings":
+        try:
+            seconds = app.save_subscription_interval(body.get("interval_minutes"))
+        except ValueError as error:
+            h._json({"error": str(error)}, 400)
+            return True
+        except OSError:
+            h._json({"error": "Could not save the check frequency."}, 500)
+            return True
+        app.bump_rev()
+        h._json({"interval_seconds": seconds})
+        return True
     if path == "/api/subscriptions":
         url = app.http_url(body.get("url"))
         if not url:

@@ -1451,6 +1451,29 @@ def collect_doctor(net: bool = False, force: bool = False) -> dict:
 
 # ───────────────────────── Subscriptions (auto-download new videos) ─────────────────────────
 SUB_INTERVAL_SECONDS = 3600  # how often a subscription is re-checked; set from --sub-interval in main()
+# Choices offered in the app. 30 minutes is the floor: checking channels more often risks YouTube rate limits.
+SUB_INTERVAL_CHOICES_MINUTES = (30, 60, 120, 360, 720, 1440)
+
+
+def _subscription_settings_store() -> JsonStore:
+    return JsonStore(lambda: CONFIG_DIR / "subscription-settings.json", SETTINGS_LOCK)
+
+
+def load_subscription_interval(default_seconds: int) -> int:
+    """A value saved in the app wins over the --sub-interval default."""
+    saved = _subscription_settings_store().load({})
+    minutes = saved.get("interval_minutes") if isinstance(saved, dict) else None
+    return minutes * 60 if minutes in SUB_INTERVAL_CHOICES_MINUTES else default_seconds
+
+
+def save_subscription_interval(minutes) -> int:
+    global SUB_INTERVAL_SECONDS
+    if isinstance(minutes, bool) or minutes not in SUB_INTERVAL_CHOICES_MINUTES:
+        raise ValueError("Choose how often to check: " + ", ".join(map(str, SUB_INTERVAL_CHOICES_MINUTES)) + " minutes.")
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _subscription_settings_store().save({"interval_minutes": minutes})
+    SUB_INTERVAL_SECONDS = minutes * 60
+    return SUB_INTERVAL_SECONDS
 SUB_TICK_SECONDS = 300       # how often the scheduler thread wakes up to see what is due
 
 SUBSCRIPTION_MANAGER = SubscriptionManager()
@@ -1988,7 +2011,7 @@ def main(argv=None) -> None:
     ROOT.mkdir(parents=True, exist_ok=True)
     load_history()
     load_subscriptions()
-    SUB_INTERVAL_SECONDS = config.subscription_interval_seconds
+    SUB_INTERVAL_SECONDS = load_subscription_interval(config.subscription_interval_seconds)
     WORKERS = config.workers
     STOP_EVENT.clear()
 
