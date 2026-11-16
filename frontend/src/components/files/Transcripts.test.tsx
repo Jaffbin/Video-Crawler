@@ -15,6 +15,8 @@ function status(overrides: Partial<TranscriptionStatus> = {}): TranscriptionStat
     install_hint: 'Install transcription support: pip install -e ".[ai]", then restart Video Grabber.',
     model: 'small',
     models: ['tiny', 'base', 'small', 'medium', 'large-v3-turbo'],
+    auto: false,
+    reuse_subtitles: true,
     items: {},
     pending: 0,
     current: null,
@@ -46,6 +48,8 @@ function serve(current: TranscriptionStatus) {
       if (init?.method === 'POST') {
         const body = JSON.parse(String(init.body))
         if (body.action === 'model') current = { ...current, model: body.model }
+        if (body.action === 'automation')
+          current = { ...current, auto: body.auto, reuse_subtitles: body.reuse_subtitles }
         if (body.action === 'cancel') current = { ...current, items: {} }
       }
       return new Response(JSON.stringify(current))
@@ -105,4 +109,25 @@ it('explains how to install transcription support when it is missing', async () 
   render(<Transcripts files={files} onToast={vi.fn()} />)
   await user.click(screen.getByRole('button', { name: 'Transcripts' }))
   expect(await screen.findByText(/pip install -e "\.\[ai\]"/)).toBeInTheDocument()
+})
+
+it('turns on automatic transcription and offers to reuse site subtitles', async () => {
+  resetTokenCache()
+  const requests = serve(status())
+  const user = userEvent.setup()
+  render(<Transcripts files={files} onToast={vi.fn()} />)
+  await user.click(screen.getByRole('button', { name: 'Transcripts' }))
+  const auto = await screen.findByRole('checkbox', {
+    name: 'Transcribe new video and audio downloads automatically',
+  })
+  expect(screen.queryByRole('checkbox', { name: /site’s subtitles/ })).not.toBeInTheDocument()
+  await user.click(auto)
+  await waitFor(() => expect(auto).toBeChecked())
+  expect(requests.at(-1)?.body).toEqual({ action: 'automation', auto: true, reuse_subtitles: true })
+  const reuse = screen.getByRole('checkbox', { name: /site’s subtitles/ })
+  expect(reuse).toBeChecked()
+  await user.click(reuse)
+  await waitFor(() =>
+    expect(requests.at(-1)?.body).toEqual({ action: 'automation', auto: true, reuse_subtitles: false }),
+  )
 })

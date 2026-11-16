@@ -5,6 +5,7 @@ import {
   fileUrl,
   getTranscription,
   searchTranscripts,
+  setTranscriptionAutomation,
   setTranscriptionModel,
 } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
@@ -220,6 +221,37 @@ export function Transcripts({ files, onToast }: { files: FileItem[]; onToast: To
             <p className="-mt-2 text-xs text-zinc-400">
               {t('Larger models are more accurate but slower. The first use downloads the model once.')}
             </p>
+          )}
+          {status && (
+            <fieldset className="grid gap-2" disabled={busy}>
+              <legend className="sr-only">{t('Automatic transcription')}</legend>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={status.auto}
+                  onChange={(event) => {
+                    const auto = event.target.checked
+                    void run(async () =>
+                      setStatus(await setTranscriptionAutomation(auto, status.reuse_subtitles)),
+                    )
+                  }}
+                />
+                <span>{t('Transcribe new video and audio downloads automatically')}</span>
+              </label>
+              {status.auto && (
+                <label className="toggle-row ml-6">
+                  <input
+                    type="checkbox"
+                    checked={status.reuse_subtitles}
+                    onChange={(event) => {
+                      const reuse = event.target.checked
+                      void run(async () => setStatus(await setTranscriptionAutomation(true, reuse)))
+                    }}
+                  />
+                  <span>{t('Use the site’s subtitles instead when a download has them')}</span>
+                </label>
+              )}
+            </fieldset>
           )}
           {error && (
             <p role="alert" className="text-sm text-red-300">

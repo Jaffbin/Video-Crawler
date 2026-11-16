@@ -229,6 +229,12 @@ export const transcribeFiles = (paths: string[]) =>
     paths,
   })
 export const cancelTranscription = () => post<TranscriptionStatus>('/api/transcripts', { action: 'cancel' })
+export const setTranscriptionAutomation = (auto: boolean, reuseSubtitles: boolean) =>
+  post<TranscriptionStatus>('/api/transcripts', {
+    action: 'automation',
+    auto,
+    reuse_subtitles: reuseSubtitles,
+  })
 export const setTranscriptionModel = (model: string) =>
   post<TranscriptionStatus>('/api/transcripts', { action: 'model', model })
 export const searchTranscripts = (query: string) =>

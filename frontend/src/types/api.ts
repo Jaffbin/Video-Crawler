@@ -182,6 +182,8 @@ export interface TranscriptionItem {
   error: string
   language: string
   seconds?: number
+  /** 'subtitles' when the site's own subtitles were imported instead of running a model. */
+  source?: 'model' | 'subtitles'
 }
 
 export interface TranscriptionStatus {
@@ -189,6 +191,8 @@ export interface TranscriptionStatus {
   install_hint: string
   model: string
   models: string[]
+  auto: boolean
+  reuse_subtitles: boolean
   items: Record<string, TranscriptionItem>
   pending: number
   current: string | null

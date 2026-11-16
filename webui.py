@@ -571,6 +571,11 @@ def run_job(job: Job) -> None:
             saved = LIBRARY.remember(records)
             for relative, names in LIBRARY.apply_auto_rules(saved, lambda rel: media_kind(Path(rel).suffix.lower())):
                 log(f"[Library] Auto rules applied to {Path(relative).name}: {', '.join(names)}")
+            if ok:
+                try:
+                    auto_transcribe(saved, job.options, log)
+                except ValueError as error:
+                    log(f"Warning: Could not queue transcription: {error}")
         except OSError as e:
             log(f"Warning: Could not save Library metadata: {e}")
     if ok:
@@ -1323,14 +1328,51 @@ def _transcription_store() -> JsonStore:
 
 def load_transcription_model() -> None:
     saved = _transcription_store().load({})
-    model = saved.get("model") if isinstance(saved, dict) else None
+    saved = saved if isinstance(saved, dict) else {}
+    model = saved.get("model")
     TRANSCRIBER.set_model(model if model in grab_transcribe.MODELS else grab_transcribe.DEFAULT_MODEL)
+    TRANSCRIBER.set_automation(saved.get("auto") is True, saved.get("reuse_subtitles") is not False)
+
+
+def _save_transcription_settings() -> None:
+    status = TRANSCRIBER.status()
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _transcription_store().save({"model": status["model"], "auto": status["auto"],
+                                 "reuse_subtitles": status["reuse_subtitles"]})
 
 
 def save_transcription_model(model) -> None:
     TRANSCRIBER.set_model(model)
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    _transcription_store().save({"model": model})
+    _save_transcription_settings()
+
+
+def save_transcription_automation(auto, reuse_subtitles) -> None:
+    TRANSCRIBER.set_automation(auto, reuse_subtitles)
+    _save_transcription_settings()
+
+
+def auto_transcribe(saved: list[str], options: dict, log) -> None:
+    """After a download: import the site's subtitles as the transcript, or queue speech recognition."""
+    status = TRANSCRIBER.status()
+    if not status["auto"]:
+        return
+    preferred = [part.strip() for part in str(options.get("sub_langs") or "").split(",") if part.strip()]
+    queue_paths = []
+    for relative in saved:
+        media = ROOT / relative
+        # Split chapters repeat the full file, which gets its own transcript.
+        if media_kind(media.suffix.lower()) not in ("audio", "video") or \
+                media.parent.name.endswith(grab.CHAPTER_FOLDER_SUFFIX):
+            continue
+        found = grab_transcribe.site_subtitles(media, preferred) if status["reuse_subtitles"] else None
+        if found and TRANSCRIBER.import_subtitles(relative, media, *found):
+            log(f"[Transcript] Used the site's {found[1]} subtitles for {media.name}")
+        else:
+            queue_paths.append(relative)
+    if queue_paths and status["available"]:
+        added = TRANSCRIBER.enqueue(queue_paths)["added"]
+        if added:
+            log(f"[Transcript] Queued {len(added)} file(s) for transcription")
 
 
 def search_transcripts(query: str) -> list[dict]:

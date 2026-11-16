@@ -250,7 +250,8 @@ def test_routes_transcribe_search_and_save_the_model(server, monkeypatch):
     assert status == 200 and body["results"] == [{"path": "lecture.mp4", "hits": [{"start": 12.5, "text": "今天讲 Python"}],
                                                   "name": "lecture.mp4", "title": "Lecture one", "kind": "video"}]
     assert call(server, "/api/transcripts", {"action": "model", "model": "base"})[1]["model"] == "base"
-    assert json.loads((webui.CONFIG_DIR / "transcription.json").read_text(encoding="utf-8")) == {"model": "base"}
+    assert json.loads((webui.CONFIG_DIR / "transcription.json").read_text(encoding="utf-8")) == {
+        "model": "base", "auto": False, "reuse_subtitles": True}
     assert call(server, "/api/transcripts", {"action": "model", "model": "huge"})[0] == 400
     assert call(server, "/api/transcripts", {"action": "dance"})[0] == 400
 
@@ -338,3 +339,88 @@ def test_other_model_errors_are_not_hidden_by_the_fallback(monkeypatch):
     assert built == ["auto"]
     assert tr.is_gpu_runtime_error(OSError("cudnn_ops64_9.dll missing"))
     assert not tr.is_gpu_runtime_error(RuntimeError("out of memory"))
+
+
+# ── Automatic transcription of new downloads ──
+def test_site_subtitles_follow_the_preferred_languages(tmp_path):
+    media = tmp_path / "Talk [x].mp4"
+    media.write_bytes(b"x")
+    for name in ("Talk [x].en.srt", "Talk [x].zh-Hans.srt", "Talk [x].transcript.srt", "Talk [x].en.vtt",
+                 "Other.en.srt"):
+        (tmp_path / name).write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
+    assert tr.site_subtitles(media, ["zh-Hans", "en"]) == (tmp_path / "Talk [x].zh-Hans.srt", "zh-Hans")
+    assert tr.site_subtitles(media, ["ja"]) == (tmp_path / "Talk [x].en.srt", "en")
+    lonely = tmp_path / "Lonely.mp4"
+    lonely.write_bytes(b"x")
+    assert tr.site_subtitles(lonely, ["en"]) is None
+
+
+def test_automation_settings_are_validated(media_dir):
+    m, _, _ = manager(media_dir, lambda *a: ([], "en"))
+    assert m.status()["auto"] is False and m.status()["reuse_subtitles"] is True
+    m.set_automation(True, False)
+    assert m.status()["auto"] is True and m.status()["reuse_subtitles"] is False
+    with pytest.raises(ValueError):
+        m.set_automation("yes", True)
+
+
+@pytest.fixture
+def auto_app(monkeypatch):
+    root = webui.ROOT  # the shared isolated fixture already points ROOT and CONFIG_DIR at temp folders
+    loader, loaded = fake_loader(lambda path, progress, cancelled: ([(0, 1, "recognized")], "en"))
+    worker = tr.TranscriptionManager(lambda relative: root / relative, loader=loader, is_available=lambda: True)
+    monkeypatch.setattr(webui, "TRANSCRIBER", worker)
+    return root, worker
+
+
+def test_new_downloads_use_site_subtitles_or_queue_recognition(auto_app):
+    root, worker = auto_app
+    for name in ("with subs.mp4", "no subs.mp3", "photo.jpg"):
+        (root / name).write_bytes(b"x")
+    (root / "with subs.zh-Hans.srt").write_text("1\n00:00:02,000 --> 00:00:03,500\n站点字幕\n", encoding="utf-8")
+    (root / "Talk chapters").mkdir()
+    (root / "Talk chapters" / "01. Intro.mp4").write_bytes(b"x")
+    lines = []
+    worker.set_automation(False, True)
+    webui.auto_transcribe(["with subs.mp4"], {"sub_langs": "zh-Hans,en"}, lines.append)
+    assert lines == [] and not (root / "with subs.transcript.srt").exists()  # off: nothing happens
+    worker.set_automation(True, True)
+    webui.auto_transcribe(["with subs.mp4", "no subs.mp3", "photo.jpg", "Talk chapters/01. Intro.mp4"],
+                          {"sub_langs": "zh-Hans,en"}, lines.append)
+    assert tr.parse_srt((root / "with subs.transcript.srt").read_text(encoding="utf-8")) == [(2.0, 3.5, "站点字幕")]
+    items = worker.status()["items"]
+    assert items["with subs.mp4"]["source"] == "subtitles" and items["with subs.mp4"]["language"] == "zh-Hans"
+    assert items["no subs.mp3"]["status"] == "queued" and set(items) == {"with subs.mp4", "no subs.mp3"}
+    assert any("site's zh-Hans subtitles" in line for line in lines)
+    assert any("Queued 1 file" in line for line in lines)
+
+
+def test_without_reuse_every_new_download_is_recognized(auto_app):
+    root, worker = auto_app
+    (root / "with subs.mp4").write_bytes(b"x")
+    (root / "with subs.en.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nsite\n", encoding="utf-8")
+    worker.set_automation(True, False)
+    webui.auto_transcribe(["with subs.mp4"], {}, lambda line: None)
+    assert worker.status()["items"]["with subs.mp4"]["status"] == "queued"
+
+
+def test_without_the_optional_package_only_subtitles_are_imported(auto_app, monkeypatch):
+    root, worker = auto_app
+    worker.is_available = lambda: False
+    (root / "a.mp4").write_bytes(b"x")
+    (root / "a.en.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nsite\n", encoding="utf-8")
+    (root / "b.mp4").write_bytes(b"x")
+    worker.set_automation(True, True)
+    webui.auto_transcribe(["a.mp4", "b.mp4"], {}, lambda line: None)
+    assert (root / "a.transcript.srt").is_file() and "b.mp4" not in worker.status()["items"]
+
+
+def test_automation_settings_persist_with_the_model(auto_app):
+    root, worker = auto_app
+    webui.save_transcription_model("base")
+    webui.save_transcription_automation(True, False)
+    saved = json.loads((webui.CONFIG_DIR / "transcription.json").read_text(encoding="utf-8"))
+    assert saved == {"model": "base", "auto": True, "reuse_subtitles": False}
+    worker.set_automation(False, True)
+    webui.load_transcription_model()
+    assert worker.status()["auto"] is True and worker.status()["reuse_subtitles"] is False

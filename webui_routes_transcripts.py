@@ -32,8 +32,11 @@ def transcripts_post(app, h, path: str, body: dict) -> bool:
         elif action == "model":
             app.save_transcription_model(body.get("model"))
             result = {}
+        elif action == "automation":
+            app.save_transcription_automation(body.get("auto"), body.get("reuse_subtitles"))
+            result = {}
         else:
-            raise ValueError("Choose start, cancel or model.")
+            raise ValueError("Choose start, cancel, model or automation.")
     except ValueError as error:
         h._json({"error": str(error)}, 400)
         return True

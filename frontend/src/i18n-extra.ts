@@ -2205,6 +2205,17 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Sponsors marked': ['已标记赞助片段', '已標記贊助片段', 'スポンサー区間に印'],
   'Split by chapter': ['按章节拆分', '按章節拆分', 'チャプターごとに分割'],
   'Save only a part': ['只保存一段', '只儲存一段', '一部分だけ保存'],
+  'Automatic transcription': ['自动转录', '自動轉錄', '自動文字起こし'],
+  'Transcribe new video and audio downloads automatically': [
+    '自动转录新下载的视频和音频',
+    '自動轉錄新下載的影片和音訊',
+    '新しくダウンロードした動画と音声を自動で文字起こし',
+  ],
+  'Use the site’s subtitles instead when a download has them': [
+    '下载附带网站字幕时，直接使用网站字幕',
+    '下載附帶網站字幕時，直接使用網站字幕',
+    'ダウンロードにサイトの字幕がある場合はそれを使う',
+  ],
   'Use minutes:seconds or hours:minutes:seconds. Leave Until empty to keep the rest. Applies to every link in this batch and is cleared afterwards.':
     [
       '使用 分:秒 或 时:分:秒。「到」留空表示保存到结尾。会应用到这一批的每个链接，添加后自动清空。',

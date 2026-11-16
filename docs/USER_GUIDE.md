@@ -707,6 +707,12 @@ and Japanese work without spaces between words.
   Transcribing a file again replaces only this file. The search index (`.grab-transcripts.db` in the
   download folder) is rebuilt from these files when needed.
 - Files are transcribed one at a time in the background and never slow downloads down.
+- **Transcribe new video and audio downloads automatically** (in Transcripts, off by default) queues
+  each finished download. With **Use the site's subtitles instead when a download has them** (on by
+  default), a download that came with subtitles (see **Download subtitles**) uses them as its
+  transcript, in the first available language from your subtitle language list, and no model runs.
+  This also works without the optional package installed. Files inside split-chapter folders are
+  skipped because the full file is transcribed.
 
 ## Automation API
 

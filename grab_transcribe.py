@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import glob
 import importlib.util
 import logging
 import os
@@ -41,6 +42,22 @@ def available() -> bool:
 
 def sidecar(media: Path) -> Path:
     return media.with_name(media.stem + SUFFIX)
+
+
+def site_subtitles(media: Path, preferred: list[str]) -> tuple[Path, str] | None:
+    """The site's own subtitles saved next to ``media`` ("<name>.<lang>.srt"), best language first."""
+    found = {}
+    for file in media.parent.glob(glob.escape(media.stem) + ".*.srt"):
+        language = file.name[len(media.stem) + 1:-len(".srt")]
+        if language and "." not in language and file.name != sidecar(media).name:
+            found[language] = file
+    if not found:
+        return None
+    for language in preferred:
+        if language in found:
+            return found[language], language
+    language = sorted(found)[0]
+    return found[language], language
 
 
 # ── SRT ──
@@ -246,6 +263,8 @@ class TranscriptionManager:
         self.loader = loader
         self.is_available = is_available
         self.model = DEFAULT_MODEL
+        self.auto = False              # transcribe new downloads automatically
+        self.reuse_subtitles = True    # ...but import the site's subtitles when a download has them
         self.lock = threading.Lock()
         self.wake = threading.Condition(self.lock)
         self.pending: collections.deque[str] = collections.deque()
@@ -278,6 +297,27 @@ class TranscriptionManager:
             raise ValueError(f"Choose one of: {', '.join(MODELS)}.")
         with self.lock:
             self.model = model
+
+    def set_automation(self, auto, reuse_subtitles) -> None:
+        if not isinstance(auto, bool) or not isinstance(reuse_subtitles, bool):
+            raise ValueError("Choose whether to transcribe new downloads automatically.")
+        with self.lock:
+            self.auto, self.reuse_subtitles = auto, reuse_subtitles
+
+    def import_subtitles(self, path: str, media: Path, subtitles: Path, language: str) -> bool:
+        """Use the site's subtitles as the transcript instead of running a model."""
+        try:
+            segments = parse_srt(subtitles.read_text(encoding="utf-8", errors="replace"))
+            if not segments:
+                return False
+            write_sidecar(media, segments)
+        except OSError as error:
+            LOG.warning("Could not import subtitles for %s: %s", path, error)
+            return False
+        with self.lock:
+            self.items[path] = {"status": "done", "percent": 100, "error": "", "language": language,
+                                "source": "subtitles"}
+        return True
 
     def enqueue(self, paths) -> dict:
         if not self.is_available():
@@ -315,6 +355,7 @@ class TranscriptionManager:
     def status(self) -> dict:
         with self.lock:
             return {"available": self.is_available(), "install_hint": INSTALL_HINT, "model": self.model,
+                    "auto": self.auto, "reuse_subtitles": self.reuse_subtitles,
                     "models": list(MODELS), "items": {path: dict(state) for path, state in self.items.items()},
                     "pending": len(self.pending), "current": self.current}
 
@@ -351,7 +392,7 @@ class TranscriptionManager:
             segments, language = transcribe(media, progress, self.cancel_current.is_set)
             write_sidecar(media, segments)
             state = {"status": "done", "percent": 100, "error": "", "language": language or "",
-                     "seconds": round(time.monotonic() - started, 1)}
+                     "seconds": round(time.monotonic() - started, 1), "source": "model"}
         except Cancelled:
             state = {"status": "canceled", "percent": 0, "error": "", "language": ""}
         except Exception as error:  # noqa: BLE001
