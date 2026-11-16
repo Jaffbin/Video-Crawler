@@ -81,6 +81,9 @@ export function NewDownloadPanel({
   const [selectedPlaylist, setSelectedPlaylist] = useState<number[] | null>(null)
   const probeRequest = useRef(0)
   const [busy, setBusy] = useState<'probe' | 'add' | null>(null)
+  // A clip range belongs to this batch only, so it lives here instead of in remembered options.
+  const [clipStart, setClipStart] = useState('')
+  const [clipEnd, setClipEnd] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
   const urlsRef = useRef(urls)
   urlsRef.current = urls
@@ -108,10 +111,14 @@ export function NewDownloadPanel({
 
   const { dragging } = useUrlImport({ onUrls: addUrls, onProblem: (m) => onToast(m, true) })
   const links = readUrls(urls)
+  const picturesOnly = options.mode === 'cover' || options.mode === 'image'
+  const section =
+    !picturesOnly && (clipStart.trim() || clipEnd.trim()) ? `${clipStart.trim()}-${clipEnd.trim()}` : ''
+  const batchOptions = section ? { ...options, section } : options
   const selectedOptions =
     selectedPlaylist === null
-      ? options
-      : { ...options, items: selectedPlaylist.join(','), no_playlist: false }
+      ? batchOptions
+      : { ...batchOptions, items: selectedPlaylist.join(','), no_playlist: false }
   // Playlist-related changes invalidate the current preview and selection.
   const changeBatchOption = (change: Partial<DownloadOptions>) => {
     if ('items' in change) {
@@ -213,6 +220,8 @@ export function NewDownloadPanel({
       }
       setExisting(null)
       setUrls('')
+      setClipStart('')
+      setClipEnd('')
       clearPreview()
       if (ids.length) onToast(t('Added {count} downloads to the queue', { count: ids.length }))
       if (duplicates) onToast(t('Skipped {count} downloads already in the queue', { count: duplicates }))
@@ -488,6 +497,43 @@ export function NewDownloadPanel({
             </details>
           )}
 
+          {!picture && (
+            <details className="download-extras">
+              <summary>{t('Save only a part')}</summary>
+              <div className="mt-3 grid gap-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="control">
+                    <span>{t('From')}</span>
+                    <input
+                      className="field"
+                      placeholder="1:20"
+                      inputMode="numeric"
+                      spellCheck={false}
+                      value={clipStart}
+                      onChange={(e) => setClipStart(e.target.value)}
+                    />
+                  </label>
+                  <label className="control">
+                    <span>{t('Until')}</span>
+                    <input
+                      className="field"
+                      placeholder="3:45"
+                      inputMode="numeric"
+                      spellCheck={false}
+                      value={clipEnd}
+                      onChange={(e) => setClipEnd(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <p className="text-xs text-zinc-400">
+                  {t(
+                    'Use minutes:seconds or hours:minutes:seconds. Leave Until empty to keep the rest. Applies to every link in this batch and is cleared afterwards.',
+                  )}
+                </p>
+              </div>
+            </details>
+          )}
+
           {selectedPlaylist?.length === 0 && (
             <p role="alert" className="text-xs text-amber-200">
               {t('Select at least one playlist entry.')}
@@ -517,6 +563,7 @@ export function NewDownloadPanel({
                 options.sponsorblock === 'remove' ? t('Sponsors removed') : '',
                 options.sponsorblock === 'mark' ? t('Sponsors marked') : '',
                 options.split_chapters ? t('Split by chapter') : '',
+                section ? t('Only {range}', { range: section }) : '',
                 !mp3 || (options.cover && !originalAudio) ? t('Cover embedded') : '',
                 !mp3 || (options.cover && (options.keep_cover || originalAudio))
                   ? t('Separate cover included')

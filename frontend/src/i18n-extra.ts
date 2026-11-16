@@ -2204,6 +2204,24 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Sponsors removed': ['已删除赞助片段', '已刪除贊助片段', 'スポンサー区間を削除'],
   'Sponsors marked': ['已标记赞助片段', '已標記贊助片段', 'スポンサー区間に印'],
   'Split by chapter': ['按章节拆分', '按章節拆分', 'チャプターごとに分割'],
+  'Save only a part': ['只保存一段', '只儲存一段', '一部分だけ保存'],
+  'Use minutes:seconds or hours:minutes:seconds. Leave Until empty to keep the rest. Applies to every link in this batch and is cleared afterwards.':
+    [
+      '使用 分:秒 或 时:分:秒。「到」留空表示保存到结尾。会应用到这一批的每个链接，添加后自动清空。',
+      '使用 分:秒 或 時:分:秒。「到」留空表示儲存到結尾。會套用到這一批的每個連結，新增後自動清空。',
+      '分:秒 または 時:分:秒 で入力します。「終了」を空欄にすると最後まで保存します。このバッチのすべてのリンクに適用され、追加後にクリアされます。',
+    ],
+  'Only {range}': ['仅 {range}', '僅 {range}', '{range} のみ'],
+  'Enter times such as 1:20 or 01:02:30.': [
+    '请输入时间，例如 1:20 或 01:02:30。',
+    '請輸入時間，例如 1:20 或 01:02:30。',
+    '1:20 や 01:02:30 のように時間を入力してください。',
+  ],
+  'The end of the part must come after its start.': [
+    '结束时间必须晚于开始时间。',
+    '結束時間必須晚於開始時間。',
+    '終了時刻は開始時刻より後にしてください。',
+  ],
   '{count} min': ['{count} 分钟', '{count} 分鐘', '{count} 分'],
   '{count} h': ['{count} 小时', '{count} 小時', '{count} 時間'],
   'Check frequency saved': ['检查频率已保存', '檢查頻率已儲存', '確認間隔を保存しました'],

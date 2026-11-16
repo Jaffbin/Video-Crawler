@@ -198,11 +198,15 @@ def make_args(o: dict):
     media_mode = a.mode in ("mp4", "mp3", "original")
     a.sponsorblock = o.get("sponsorblock") if media_mode and o.get("sponsorblock") in ("mark", "remove") else ""
     a.split_chapters = media_mode and o.get("split_chapters") is True
+    try:
+        a.section = grab.parse_section(o.get("section")) if media_mode else None
+    except ValueError:
+        a.section = None  # validated when the task is created; never download the wrong part silently
     items = str(o.get("items") or "").strip()
     a.items = items if re.fullmatch(r"[\d,\-:]+", items) else None
     # Video and audio keep separate skip lists, so having a video as MP3 never hides it from an MP4 request.
     a.archive = (str(ROOT / (".archive-audio.txt" if a.mode in ("mp3", "original") else ".archive.txt"))
-                 if o.get("archive") else None)
+                 if o.get("archive") and not a.section else None)
     br = str(o.get("cookies_from_browser") or "")
     a.cookies_from_browser = br if br in BROWSERS else None
     # An uploaded cookies.txt wins over reading a browser
@@ -233,6 +237,8 @@ def make_args(o: dict):
 
 def download_profile(args) -> dict:
     profile = {"mode": args.mode}
+    if getattr(args, "section", None):
+        profile["section"] = grab.section_label(args.section)
     # Only recorded when used, so earlier downloads keep matching the same settings.
     if getattr(args, "sponsorblock", ""):
         profile["sponsorblock"] = args.sponsorblock

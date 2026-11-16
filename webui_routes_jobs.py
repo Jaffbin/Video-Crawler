@@ -58,6 +58,13 @@ def jobs_post(app, h, path: str, body: dict) -> bool:
         if not isinstance(options, dict):
             h._json({"error": "options must be an object"}, 400)
             return True
+        try:
+            if app.grab.parse_section(options.get("section")):
+                # A clip must not mark the whole video as downloaded in the skip list.
+                options = {**options, "archive": False}
+        except ValueError as error:
+            h._json({"error": str(error)}, 400)
+            return True
         action = body.get("existing_action")
         if action not in (None, "skip", "download"):
             h._json({"error": "Choose a valid existing download action"}, 400)

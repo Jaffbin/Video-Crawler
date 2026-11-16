@@ -132,3 +132,137 @@ def test_real_run_removes_a_sponsor_and_splits_chapters(tmp_path, media_site, mo
     assert duration(full) == pytest.approx(5.0, abs=0.6)  # the 1 s sponsor is gone, cut at keyframes
     parts = sorted(p.name for p in grab.chapter_folder(full).iterdir())
     assert parts == ["01. Part one.mp4", "02. Part two.mp4"]
+
+
+# ── Clips ──
+@pytest.mark.parametrize("value, expected", [
+    ("1:20-3:45", (80.0, 225.0)),
+    ("01:02:03-01:02:13.5", (3723.0, 3733.5)),
+    ("80-225", (80.0, 225.0)),
+    ("1:20-", (80.0, float("inf"))),
+    ("-0:30", (0.0, 30.0)),
+    ("", None),
+    (None, None),
+])
+def test_clip_ranges_are_parsed(value, expected):
+    assert grab.parse_section(value) == expected
+
+
+@pytest.mark.parametrize("value", ["3:45-1:20", "1:20", "1:20-2:00-3:00", "a-b", "1:2:3:4-5", "1:20-1:20",
+                                   "25:00:00-26:00:00", 80])
+def test_bad_clip_ranges_are_rejected(value):
+    with pytest.raises(ValueError):
+        grab.parse_section(value)
+
+
+def test_clip_labels_are_safe_for_filenames():
+    assert grab.section_label((80.0, 225.0)) == "1m20s-3m45s"
+    assert grab.section_label((3723.0, float("inf"))) == "1h2m3s-end"
+    assert grab.section_label((5.9, 9.0)) == "5s-9s"
+
+
+def test_a_clip_gets_its_own_name_exact_cuts_and_no_skip_list(tmp_path):
+    args = args_for(tmp_path, mode="mp4", section="1:20-3:45", archive=True)
+    assert args.section == (80.0, 225.0) and args.archive is None
+    opts = grab.build_opts(args)
+    assert opts["outtmpl"].endswith("[%(id)s] [1m20s-3m45s].%(ext)s")
+    assert opts["force_keyframes_at_cuts"] is True and opts["download_ranges"] is not None
+    assert "section" not in grab.build_opts(args_for(tmp_path, mode="cover", section="1:20-3:45"))
+    assert args_for(tmp_path, mode="mp4", section="garbage").section is None
+    assert webui.download_profile(args)["section"] == "1m20s-3m45s"
+
+
+@pytest.fixture
+def range_site(tmp_path):
+    """Serves files with HTTP Range support, like real sites; ffmpeg seeks with it to cut a clip."""
+    import http.server
+    import threading
+
+    site = tmp_path / "site"
+    site.mkdir()
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(site), **kwargs)
+
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            path = site / self.path.lstrip("/")
+            data = path.read_bytes()
+            ranged = self.headers.get("Range", "").replace("bytes=", "")
+            start, end = 0, len(data) - 1
+            if ranged:
+                first, _, last = ranged.partition("-")
+                start = int(first or 0)
+                end = int(last) if last else end
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+            else:
+                self.send_response(200)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.end_headers()
+            self.wfile.write(data[start:end + 1])
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield site, f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg is not installed")
+def test_real_run_saves_only_the_requested_part(tmp_path, range_site):
+    site, base = range_site
+    subprocess.run([str(FFMPEG_EXE), "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=25",
+                    "-f", "lavfi", "-i", "sine=frequency=440", "-t", "6", "-g", "25", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-movflags", "+faststart",
+                    str(site / "six.mp4")], check=True)
+    out = tmp_path / "dl"
+    opts = grab.build_opts(args_for(out, mode="mp4", section="0:01.5-0:04"))
+    opts.update(quiet=True, noprogress=True)
+    info = {"id": "abc123", "title": "Demo", "extractor": "generic", "extractor_key": "Generic",
+            "webpage_url": f"{base}/six.mp4", "duration": 6.0,
+            "url": f"{base}/six.mp4", "ext": "mp4", "protocol": "http"}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        ydl.process_ie_result(info, download=True)
+    saved = out / "Demo [abc123] [1s-4s].mp4"
+    assert saved.is_file() and duration(saved) == pytest.approx(2.5, abs=0.4)
+
+
+def test_the_job_route_rejects_a_bad_range_and_drops_the_skip_list(tmp_path, monkeypatch):
+    import threading
+    import json
+    import urllib.request
+    import urllib.error
+
+    root = (tmp_path / "dl").resolve()
+    root.mkdir()
+    monkeypatch.setattr(webui, "ROOT", root)
+    monkeypatch.setattr(webui, "CONFIG_DIR", tmp_path / "cfg")
+    webui.JOB_MANAGER.reset()
+    srv = webui.Server(("127.0.0.1", 0), webui.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}"
+
+    def post(body):
+        request = urllib.request.Request(base + "/api/jobs", data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json", "X-Token": webui.TOKEN})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            return error.code, json.loads(error.read())
+
+    try:
+        status, body = post({"urls": ["https://example.com/v"], "options": {"section": "3:00-1:00"}})
+        assert status == 400 and "after its start" in body["error"]
+        status, body = post({"urls": ["https://example.com/v"], "options": {"section": "1:00-2:00", "archive": True}})
+        assert status == 200 and webui.JOB_MANAGER.get(body["ids"][0]).options["archive"] is False
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        webui.JOB_MANAGER.reset()

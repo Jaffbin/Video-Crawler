@@ -38,6 +38,7 @@ access controls.
 - Download subtitles and cover art.
 - Keep chapters, optionally save one file per chapter, and mark or remove YouTube sponsor segments
   with SponsorBlock (off by default).
+- Save only part of a video or audio track by start and end time, with exact cuts.
 - Save only a video's cover, or download a direct JPG, PNG, WebP, GIF or AVIF URL in its original format.
 - Filter images in Library and preview them at a fitted or original size; manage them with rename and recovery.
 - Preview titles, thumbnails, duration and available resolutions before downloading; select playlist entries.

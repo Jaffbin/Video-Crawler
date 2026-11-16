@@ -389,3 +389,27 @@ it('sends SponsorBlock and chapter choices and explains what SponsorBlock receiv
     expect(requests.at(-1)?.options).toMatchObject({ sponsorblock: 'remove', split_chapters: true }),
   )
 })
+
+it('sends a clip range with this batch only and clears it afterwards', async () => {
+  const requests: any[] = []
+  resetTokenCache()
+  localStorage.clear()
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body || '{}')))
+      return new Response(JSON.stringify({ ids: ['1234abcd'] }))
+    }),
+  )
+  const user = userEvent.setup()
+  render(<Panel />)
+  await user.click(screen.getByText('Save only a part'))
+  await user.type(screen.getByRole('textbox', { name: 'From' }), '1:20')
+  await user.type(screen.getByRole('textbox', { name: 'Until' }), '3:45')
+  expect(screen.getByLabelText('Download summary')).toHaveTextContent('Only 1:20-3:45')
+  await user.type(screen.getByRole('textbox', { name: /links to download/i }), 'https://example.com/v')
+  await user.click(screen.getByRole('button', { name: 'Start download' }))
+  await waitFor(() => expect(requests.at(-1)?.options).toMatchObject({ section: '1:20-3:45' }))
+  await waitFor(() => expect(screen.getByRole('textbox', { name: 'From' })).toHaveValue(''))
+  expect(localStorage.getItem('grab-options') ?? '').not.toContain('section')
+})

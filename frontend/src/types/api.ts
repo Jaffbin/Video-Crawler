@@ -14,6 +14,8 @@ export interface DownloadOptions {
   /** YouTube only: '' keeps everything, 'mark' adds chapters, 'remove' cuts sponsor segments. */
   sponsorblock: '' | 'mark' | 'remove'
   split_chapters: boolean
+  /** Only this part, e.g. "1:20-3:45". Sent with a request; never remembered between downloads. */
+  section?: string
   no_playlist: boolean
   items: string
   archive: boolean

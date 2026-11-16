@@ -190,6 +190,44 @@ SPONSORBLOCK_MARK = ("sponsor", "intro", "outro", "selfpromo", "preview", "fille
 CHAPTER_FOLDER_SUFFIX = " chapters"
 
 
+SECTION_MAX_SECONDS = 24 * 3600
+
+
+def _clock(text: str) -> float:
+    parts = text.strip().split(":")
+    if not 1 <= len(parts) <= 3 or not all(re.fullmatch(r"\d+(\.\d+)?", part) for part in parts):
+        raise ValueError("Enter times such as 1:20 or 01:02:30.")
+    seconds = 0.0
+    for part in parts:
+        seconds = seconds * 60 + float(part)
+    return seconds
+
+
+def parse_section(value) -> tuple[float, float] | None:
+    """"1:20-3:45" -> (80.0, 225.0); "1:20-" runs to the end. Empty means the whole video."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or value.count("-") != 1 or len(value) > 40:
+        raise ValueError("Enter the part to save as start-end, for example 1:20-3:45.")
+    start_text, end_text = value.split("-")
+    start = _clock(start_text) if start_text.strip() else 0.0
+    end = _clock(end_text) if end_text.strip() else float("inf")
+    if end <= start or start >= SECTION_MAX_SECONDS:
+        raise ValueError("The end of the part must come after its start.")
+    return start, end
+
+
+def section_label(section: tuple[float, float]) -> str:
+    """Filename-safe range, e.g. "1m20s-3m45s" (colons are not allowed in Windows filenames)."""
+    def label(seconds: float) -> str:
+        whole = int(seconds)
+        hours, rest = divmod(whole, 3600)
+        minutes, secs = divmod(rest, 60)
+        return (f"{hours}h" if hours else "") + (f"{minutes}m" if hours or minutes else "") + f"{secs}s"
+    start, end = section
+    return f"{label(start)}-{'end' if end == float('inf') else label(end)}"
+
+
 def chapter_folder(media: Path) -> Path:
     """Where split chapters of ``media`` are saved: a folder named after the full file."""
     return media.with_name(media.stem + CHAPTER_FOLDER_SUFFIX)
@@ -208,6 +246,10 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
     else:     # Playlists automatically create subfolders and numbers
         stem = (f"{base}/%(playlist_title|)s/"
                 "%(playlist_index&{:02d}. |)s%(title).120B [%(id)s]")
+    section = getattr(args, "section", None) if args.mode in ("mp4", "mp3", "original") else None
+    if section:
+        # A clip never takes the full download's name, so neither replaces the other.
+        stem += f" [{section_label(section)}]"
     tmpl = stem + ".%(ext)s"
     split_chapters = getattr(args, "split_chapters", False) and args.mode in ("mp4", "mp3", "original")
     if split_chapters:
@@ -227,6 +269,9 @@ def build_opts(args, referer: str | None = None, name: str | None = None, work_d
         "continuedl": True,
         "windowsfilenames": True,
     }
+    if section:
+        opts["download_ranges"] = yt_dlp.utils.download_range_func(None, [section])
+        opts["force_keyframes_at_cuts"] = True  # exact cuts; only the frames around each cut are re-encoded
     location = ffmpeg_location(getattr(args, "ffmpeg_location", None))
     if location:
         opts["ffmpeg_location"] = location

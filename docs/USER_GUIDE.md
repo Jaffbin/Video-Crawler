@@ -202,6 +202,17 @@ Video and audio downloads keep the site's chapters inside the file when it provi
 
 Both settings are remembered, can be saved in presets and are included in backups.
 
+## Save only part of a video
+
+Open **Save only a part** in New download and enter **From** and **Until** as minutes:seconds or
+hours:minutes:seconds, for example `1:20` and `3:45`. Leave **Until** empty to keep the rest of the
+video. Cuts are exact: only the frames around each cut are re-encoded, which takes a little longer.
+
+The part is saved with the range in its name, for example `Talk [abc] [1m20s-3m45s].mp4`, so it
+never replaces a full download, and the skip list is not updated. The range applies to every link
+in that batch and is cleared after the downloads are added; it is not remembered or saved in
+presets. Video and audio only.
+
 ## Download covers and images
 
 Choose **Video cover** for a video page supported by yt-dlp. The app extracts its thumbnail URLs
