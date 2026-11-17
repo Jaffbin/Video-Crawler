@@ -19,10 +19,43 @@ def library_get(app, h, path: str) -> bool:
     if path == "/api/library/auto-rules":
         h._json({"auto_rules": app.LIBRARY.auto_rules()})
         return True
+    if path == "/api/media-export":
+        if not h._session_cookie_ok():
+            h._json({"error": "Open Video Grabber to manage the media server folder."}, 403)
+            return True
+        h._json(app.media_export_status())
+        return True
     return False
 
 
+def media_export_post(app, h, body: dict) -> None:
+    """The export folder decides where files are written, so only the app window may use this."""
+    if not h._session_cookie_ok():
+        h._json({"error": "Open Video Grabber to manage the media server folder."}, 403)
+        return
+    action = body.get("action")
+    try:
+        if action == "folder":
+            h._json(app.save_media_export_folder(body.get("folder")))
+        elif action == "export":
+            paths = body.get("paths")
+            if not isinstance(paths, list) or not 1 <= len(paths) <= 500 or \
+                    not all(isinstance(item, str) for item in paths):
+                raise ValueError("Choose between 1 and 500 files.")
+            # No queue lock: copying to another disk can take a while.
+            h._json(app.export_to_media_server(paths))
+        else:
+            raise ValueError("Choose folder or export.")
+    except (ValueError, app.grab_mediaexport.ExportError) as error:
+        h._json({"error": str(error)}, 400)
+    except OSError:
+        h._json({"error": "Could not save the media server folder."}, 500)
+
+
 def library_post(app, h, path: str, body: dict) -> bool:
+    if path == "/api/media-export":
+        media_export_post(app, h, body)
+        return True
     if path == "/api/library/repair":
         try:
             p = app.LIBRARY.media_path(body.get("path"))
@@ -65,12 +98,17 @@ def library_post(app, h, path: str, body: dict) -> bool:
 
     if path in ("/api/library/organize", "/api/library/collections", "/api/library/smart-collections",
                 "/api/library/auto-rules"):
+        export_now = []
         try:
             with app.QUEUE.mutex:
                 if path.endswith("/auto-rules") and body.get("action") in ("preview_existing", "apply_existing"):
                     files = [(item["path"], item["kind"]) for item in app.list_files(force=True) if item["complete"]]
-                    result = app.LIBRARY.apply_auto_rule_to_existing(
-                        body.get("id"), files, dry_run=body["action"] == "preview_existing")
+                    dry_run = body["action"] == "preview_existing"
+                    result = app.LIBRARY.apply_auto_rule_to_existing(body.get("id"), files, dry_run=dry_run)
+                    paths = result.pop("paths")
+                    if result.pop("export"):
+                        export_now = [p for p in paths if app.media_kind(Path(p).suffix.lower()) == "video"]
+                        result["export"] = len(export_now)
                 elif path.endswith("/auto-rules"):
                     rule_id = app.LIBRARY.change_auto_rule(body.get("action"), body.get("id"), body.get("rule"))
                     result = {"id": rule_id, "auto_rules": app.LIBRARY.auto_rules()}
@@ -84,6 +122,13 @@ def library_post(app, h, path: str, body: dict) -> bool:
                 else:
                     collection_id = app.LIBRARY.change_collection(body.get("action"), body.get("name"), body.get("id"))
                     result = {"id": collection_id, "collections": app.LIBRARY.collections()}
+            if export_now and body.get("action") == "apply_existing":
+                # Outside the queue lock: copying to another disk can take a while.
+                try:
+                    exported = app.export_to_media_server(export_now)
+                    result.update(exported=exported["exported"], export_failed=len(exported["failed"]))
+                except app.grab_mediaexport.ExportError as error:
+                    result["export_error"] = str(error)
             app.bump_rev()
             h._json(result)
             return True

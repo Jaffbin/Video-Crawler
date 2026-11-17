@@ -236,6 +236,7 @@ class Subscription:
         self.last_queued = 0
         self.last_filtered = 0
         self.removed = False
+        self.export_media = False  # also place new downloads in the media server folder
 
     def to_dict(self) -> dict:
         return {
@@ -247,7 +248,7 @@ class Subscription:
             "last_error_kind": self.last_error_kind, "total_queued": self.total_queued,
             "total_filtered": self.total_filtered,
             "last_found": self.last_found, "last_queued": self.last_queued,
-            "last_filtered": self.last_filtered,
+            "last_filtered": self.last_filtered, "export_media": self.export_media,
         }
 
     @classmethod
@@ -265,6 +266,7 @@ class Subscription:
         seen_ids = data.get("seen_ids")
         subscription.seen_ids = {str(item) for item in seen_ids if item} if isinstance(seen_ids, list) else set()
         subscription.initialized = bool(data.get("initialized"))
+        subscription.export_media = data.get("export_media") is True
         subscription.last_error = str(data.get("last_error") or "")[:600]
         subscription.last_error_kind = str(data.get("last_error_kind") or "")[:40]
         try:
@@ -290,5 +292,5 @@ class Subscription:
             "last_found": self.last_found, "last_queued": self.last_queued,
             "last_filtered": self.last_filtered,
             "next_check": (self.last_checked + interval_seconds) if self.enabled else None,
-            "checking": checking,
+            "checking": checking, "export_media": self.export_media,
         }

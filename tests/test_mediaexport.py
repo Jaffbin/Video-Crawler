@@ -121,3 +121,149 @@ def test_site_facts_are_kept_bounded_with_the_library_record(tmp_path):
     library.remember({"v.mp4": {"source_url": "https://www.youtube.com/watch?v=abc", "title": "V",
                                 "complete": True, "media_info": {"id": "abc", "channel": "Chan"}}})
     assert library.load()["files"]["v.mp4"]["media_info"] == {"id": "abc", "channel": "Chan"}
+
+
+# ── Settings, subscriptions, rules and the post-download step ──
+import json  # noqa: E402
+import threading  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+
+import grab_auto_rules  # noqa: E402
+from grab_models import Job, Subscription  # noqa: E402
+
+SESSION = {"Cookie": f"{webui.SESSION_COOKIE}={webui.SESSION_SECRET}"}
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch):
+    root = (tmp_path / "dl").resolve()
+    root.mkdir()
+    monkeypatch.setattr(webui, "ROOT", root)
+    monkeypatch.setattr(webui, "CONFIG_DIR", tmp_path / "cfg")
+    monkeypatch.setattr(webui, "LIBRARY", MediaLibrary(lambda: root, webui.MEDIA_SUFFIX))
+    monkeypatch.setattr(webui, "FILES_CACHE", {"rev": None, "ts": 0.0, "data": []})
+    webui.SUBSCRIPTION_MANAGER.reset()
+    for name in ("shed.mp4", "song.mp3"):
+        (root / name).write_bytes(b"bytes-" + name.encode())
+    webui.LIBRARY.remember({
+        "shed.mp4": {**RECORD, "complete": True},
+        "song.mp3": {"source_url": "https://www.youtube.com/watch?v=s1", "title": "Song", "complete": True},
+    })
+    yield root, tmp_path / "media"
+    webui.SUBSCRIPTION_MANAGER.reset()
+
+
+def test_subscription_flag_round_trips():
+    sub = Subscription("https://www.youtube.com/@wood", {"mode": "mp4"})
+    assert sub.export_media is False and sub.view(3600, False)["export_media"] is False
+    sub.export_media = True
+    again = Subscription.from_dict(sub.to_dict())
+    assert again.export_media is True and again.view(3600, False)["export_media"] is True
+
+
+def test_rules_can_export_and_validation_stays_strict():
+    rule = grab_auto_rules.check_rule({"name": "To NAS", "conditions": {"kind": "video"}, "actions": {"export": True}},
+                                      {})
+    assert rule["actions"] == {"export": True}
+    with pytest.raises(ValueError):
+        grab_auto_rules.check_rule({"name": "x", "conditions": {"kind": "video"}, "actions": {"export": "yes"}}, {})
+
+
+def test_folder_setting_is_validated_and_export_is_off_until_set(app):
+    root, media = app
+    assert webui.media_export_status() == {"folder": "", "ready": False, "error": ""}
+    with pytest.raises(mx.ExportError, match="outside the download folder"):
+        webui.save_media_export_folder(str(root / "nas"))
+    with pytest.raises(mx.ExportError, match="Choose a media server folder"):
+        webui.export_to_media_server(["shed.mp4"])
+    assert webui.save_media_export_folder(str(media))["ready"] is True
+    assert webui.save_media_export_folder("")["folder"] == ""
+
+
+def test_export_counts_videos_and_skips_audio_and_missing_files(app):
+    root, media = app
+    webui.save_media_export_folder(str(media))
+    lines = []
+    result = webui.export_to_media_server(["shed.mp4", "song.mp3", "gone.mp4"], lines.append)
+    assert result["exported"] == 1 and result["skipped"] == 1 and result["failed"][0]["path"] == "gone.mp4"
+    assert webui.export_to_media_server(["shed.mp4"])["existing"] == 1
+    assert any("Exported shed.mp4 (hardlink)" in line for line in lines)
+    assert (media / "Wood Works" / "tvshow.nfo").is_file()
+
+
+def test_new_downloads_export_for_a_flagged_subscription_or_a_matching_rule(app):
+    root, media = app
+    webui.save_media_export_folder(str(media))
+    sub = Subscription("https://www.youtube.com/@wood", {"mode": "mp4"})
+    webui.SUBSCRIPTION_MANAGER.add(sub)
+    job = Job("https://www.youtube.com/watch?v=abc123", {"mode": "mp4"})
+    job.source = sub.id
+    lines = []
+    webui.export_new_download(job, ["shed.mp4"], lines.append)
+    assert lines == [] and not media.exists()  # subscription not flagged, no rule
+    sub.export_media = True
+    webui.export_new_download(job, ["shed.mp4"], lines.append)
+    assert any("Exported shed.mp4" in line for line in lines)
+    plain = Job("https://example.com/x", {"mode": "mp4"})
+    webui.LIBRARY.change_auto_rule("create", rule={"name": "NAS", "conditions": {"source": "youtube.com"},
+                                                   "actions": {"export": True}})
+    webui.export_new_download(plain, ["shed.mp4"], lines.append)
+    assert any("Already exported shed.mp4" in line for line in lines)
+
+
+def test_a_missing_folder_is_logged_instead_of_failing_the_download(app):
+    sub = Subscription("https://www.youtube.com/@wood", {"mode": "mp4"})
+    sub.export_media = True
+    webui.SUBSCRIPTION_MANAGER.add(sub)
+    job = Job("https://www.youtube.com/watch?v=abc123", {"mode": "mp4"})
+    job.source = sub.id
+    lines = []
+    webui.export_new_download(job, ["shed.mp4"], lines.append)
+    assert any("Not exported to the media server folder" in line for line in lines)
+
+
+@pytest.fixture
+def server(app):
+    srv = webui.Server(("127.0.0.1", 0), webui.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_port}", app
+    srv.shutdown()
+    srv.server_close()
+
+
+def call(base, path, body=None, headers=None):
+    request = urllib.request.Request(base + path, data=json.dumps(body).encode() if body is not None else None,
+                                     headers={"Content-Type": "application/json", "X-Token": webui.TOKEN,
+                                              **(headers or {})})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"{}")
+
+
+def test_only_the_app_window_can_choose_the_folder_or_export(server):
+    base, (root, media) = server
+    extension = {"X-Grab-Client": "extension"}
+    assert call(base, "/api/media-export", headers=extension)[0] == 403
+    assert call(base, "/api/media-export", {"action": "folder", "folder": str(media)}, extension)[0] == 403
+    assert call(base, "/api/media-export", {"action": "export", "paths": ["shed.mp4"]}, extension)[0] == 403
+    status, body = call(base, "/api/media-export", {"action": "folder", "folder": str(media)}, SESSION)
+    assert status == 200 and body["ready"] is True
+    status, body = call(base, "/api/media-export", {"action": "export", "paths": ["shed.mp4", "song.mp3"]}, SESSION)
+    assert status == 200 and body["exported"] == 1 and body["skipped"] == 1
+    assert call(base, "/api/media-export", {"action": "export", "paths": []}, SESSION)[0] == 400
+
+
+def test_existing_files_preview_and_export_through_a_rule(server):
+    base, (root, media) = server
+    call(base, "/api/media-export", {"action": "folder", "folder": str(media)}, SESSION)
+    rule_id = call(base, "/api/library/auto-rules", {"action": "create", "rule": {
+        "name": "NAS", "conditions": {"source": "youtube.com"}, "actions": {"export": True}}})[1]["id"]
+    status, body = call(base, "/api/library/auto-rules", {"action": "preview_existing", "id": rule_id})
+    assert status == 200 and body == {"matched": 2, "changed": 0, "export": 1}
+    assert not media.exists()
+    status, body = call(base, "/api/library/auto-rules", {"action": "apply_existing", "id": rule_id})
+    assert body["exported"] == 1 and body["export_failed"] == 0
+    assert list((media / "Wood Works" / "Season 2026").glob("*.mp4"))

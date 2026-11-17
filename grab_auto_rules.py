@@ -62,7 +62,7 @@ def check_rule(value, collection_ids) -> dict:
         raise ValueError("Choose a site, a file type or a format.")
 
     raw_actions = value.get("actions")
-    if not isinstance(raw_actions, dict) or set(raw_actions) - {"tags", "collections", "favorite"}:
+    if not isinstance(raw_actions, dict) or set(raw_actions) - {"tags", "collections", "favorite", "export"}:
         raise ValueError("Choose tags, collections or favorite.")
     actions = {}
     tags = raw_actions.get("tags", [])
@@ -88,6 +88,11 @@ def check_rule(value, collection_ids) -> dict:
         raise ValueError("Invalid auto rule.")
     if favorite:
         actions["favorite"] = True
+    export = raw_actions.get("export", False)
+    if not isinstance(export, bool):
+        raise ValueError("Invalid auto rule.")
+    if export:
+        actions["export"] = True  # place matching videos in the media server folder
     if not actions:
         raise ValueError("Choose tags, collections or favorite.")
     return {"name": name.strip(), "enabled": enabled, "conditions": conditions, "actions": actions}

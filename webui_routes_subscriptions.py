@@ -69,6 +69,11 @@ def subscriptions_post(app, h, path: str, body: dict) -> bool:
                 sub.enabled = bool(body["enabled"])
             if "options" in body and isinstance(body["options"], dict):
                 sub.options = dict(body["options"])
+            if "export_media" in body:
+                if not isinstance(body["export_media"], bool):
+                    h._json({"error": "export_media must be true or false"}, 400)
+                    return True
+                sub.export_media = body["export_media"]
             if "filters" in body:
                 if not isinstance(body["filters"], dict):
                     h._json({"error": "filters must be an object"}, 400)

@@ -60,6 +60,7 @@ from grab_archive import seed_archive  # noqa: E402
 from grab_hooks import HookRunner, ensure_config_file, load_config  # noqa: E402
 import grab_push  # noqa: E402
 import grab_schedule  # noqa: E402
+import grab_mediaexport  # noqa: E402
 from grab_errors import error_details, fmt_eta, fmt_speed, friendly_error, strip_ansi  # noqa: E402
 import grab_cookies  # noqa: E402
 import webui_routes_library  # noqa: E402
@@ -582,6 +583,7 @@ def run_job(job: Job) -> None:
             for relative, names in LIBRARY.apply_auto_rules(saved, lambda rel: media_kind(Path(rel).suffix.lower())):
                 log(f"[Library] Auto rules applied to {Path(relative).name}: {', '.join(names)}")
             if ok:
+                export_new_download(job, saved, log)
                 try:
                     auto_transcribe(saved, job.options, log)
                 except ValueError as error:
@@ -1471,6 +1473,74 @@ def change_api_settings(action: str) -> dict:
         saved["enabled"] = action == "enable"
     store.save(saved)
     return {**api_settings_view(), **({"token": token} if token else {})}
+
+
+# ───────────────────────── Media server export ─────────────────────────
+def _media_export_store() -> JsonStore:
+    return JsonStore(lambda: CONFIG_DIR / "media-export.json", SETTINGS_LOCK)
+
+
+def media_export_status() -> dict:
+    saved = _media_export_store().load({})
+    folder = saved.get("folder") if isinstance(saved, dict) and isinstance(saved.get("folder"), str) else ""
+    error = ""
+    if folder:
+        try:
+            grab_mediaexport.check_folder(folder, ROOT)
+        except grab_mediaexport.ExportError as problem:
+            error = str(problem)  # e.g. the download folder moved underneath it
+    return {"folder": folder, "ready": bool(folder) and not error, "error": error}
+
+
+def save_media_export_folder(folder) -> dict:
+    """Empty turns export off. Only the app window may change it: it decides where files are written."""
+    if folder in ("", None):
+        value = ""
+    else:
+        value = str(grab_mediaexport.check_folder(folder, ROOT))
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _media_export_store().save({"folder": value})
+    return media_export_status()
+
+
+def export_to_media_server(relatives: list[str], log=None) -> dict:
+    """Export Library videos; audio and images are skipped. Returns counts and per-file problems."""
+    status = media_export_status()
+    if not status["ready"]:
+        raise grab_mediaexport.ExportError(status["error"] or "Choose a media server folder in Settings first.")
+    folder = Path(status["folder"])
+    records = LIBRARY.load()["files"]
+    counts = {"exported": 0, "existing": 0, "skipped": 0, "failed": []}
+    for relative in dict.fromkeys(relatives):
+        try:
+            media = LIBRARY.media_path(relative)
+            relative = media.relative_to(ROOT.resolve()).as_posix()
+            if media_kind(media.suffix.lower()) != "video":
+                counts["skipped"] += 1
+                continue
+            result = grab_mediaexport.export_video(media, records.get(relative, {}), relative, folder)
+            counts["exported" if result["status"] == "exported" else "existing"] += 1
+            if log:
+                log(f"[Media server] {'Exported' if result['status'] == 'exported' else 'Already exported'} "
+                    f"{media.name} ({result['method']})")
+        except (grab_mediaexport.ExportError, ValueError, OSError) as error:
+            counts["failed"].append({"path": relative, "error": str(error)})
+            if log:
+                log(f"Warning: Could not export {Path(relative).name} to the media server folder: {error}")
+    return counts
+
+
+def export_new_download(job: Job, saved: list[str], log) -> None:
+    """After a download: export for a subscription that asks for it, or for a matching auto rule."""
+    subscription = SUBSCRIPTION_MANAGER.get(job.source) if job.source else None
+    wanted = list(saved) if subscription and subscription.export_media else []
+    wanted += LIBRARY.auto_rule_exports(saved, lambda rel: media_kind(Path(rel).suffix.lower()))
+    if not wanted:
+        return
+    try:
+        export_to_media_server(wanted, log)
+    except grab_mediaexport.ExportError as error:
+        log(f"Warning: Not exported to the media server folder: {error}")
 
 
 # ───────────────────────── Download schedule ─────────────────────────

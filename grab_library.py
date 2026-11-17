@@ -162,6 +162,19 @@ class MediaLibrary:
                 self.store.save(data)
             return applied
 
+    def auto_rule_exports(self, relatives: list[str], kind_of) -> list[str]:
+        """Newly saved files that an enabled rule asks to export to the media server folder."""
+        with self.lock:
+            data = self.load()
+        rules = [rule for rule in data["auto_rules"].values() if rule["enabled"] and rule["actions"].get("export")]
+        wanted = []
+        for relative in dict.fromkeys(relatives):
+            record = data["files"].get(relative)
+            if isinstance(record, dict) and record.get("complete") is not False and any(
+                    grab_auto_rules.matches(rule, relative, record, kind_of(relative)) for rule in rules):
+                wanted.append(relative)
+        return wanted
+
     def apply_auto_rule_to_existing(self, rule_id, files: list[tuple[str, str]], *, dry_run: bool) -> dict:
         """Run one rule over files already in the Library, even if it is turned off.
 
@@ -176,12 +189,14 @@ class MediaLibrary:
                 raise ValueError("Auto rule no longer exists. Refresh Library.")
             rule = {**data["auto_rules"][rule_id], "enabled": True}
             matched = changed = 0
+            matched_paths = []
             for relative, kind in files:
                 current = data["files"].get(relative)
                 record = dict(current) if isinstance(current, dict) else {}
                 if record.get("complete") is False or not grab_auto_rules.matches(rule, relative, record, kind):
                     continue
                 matched += 1
+                matched_paths.append(relative)
                 updated = copy.deepcopy(record)
                 grab_auto_rules.apply(rule, updated, data["collections"])
                 if updated != record:
@@ -189,7 +204,8 @@ class MediaLibrary:
                     data["files"][relative] = updated
             if changed and not dry_run:
                 self.store.save(data)
-            return {"matched": matched, "changed": changed}
+            return {"matched": matched, "changed": changed, "paths": matched_paths,
+                    "export": bool(rule["actions"].get("export"))}
 
     def change_smart_collection(self, action, name=None, collection_id=None, rules=None) -> str:
         with self.lock:
