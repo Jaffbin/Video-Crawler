@@ -215,11 +215,12 @@ def test_existing_files_preview_then_apply_even_when_the_rule_is_off(library):
     media(library, "untracked.mp4")  # discovered on disk, no record: no source, so no match
     files = [(name, "video") for name in ("old.mp4", "done.mp4", "other.mp4", "untracked.mp4")]
     before = library.load()
-    assert library.apply_auto_rule_to_existing(rule_id, files, dry_run=True) == {"matched": 2, "changed": 1}
+    assert library.apply_auto_rule_to_existing(rule_id, files, dry_run=True) == {
+        "matched": 2, "changed": 1, "paths": ["old.mp4", "done.mp4"], "export": False}
     assert library.load() == before
-    assert library.apply_auto_rule_to_existing(rule_id, files, dry_run=False) == {"matched": 2, "changed": 1}
+    assert library.apply_auto_rule_to_existing(rule_id, files, dry_run=False)["changed"] == 1
     assert library.load()["files"]["old.mp4"]["tags"] == ["B站"]
-    assert library.apply_auto_rule_to_existing(rule_id, files, dry_run=False) == {"matched": 2, "changed": 0}
+    assert library.apply_auto_rule_to_existing(rule_id, files, dry_run=False)["changed"] == 0
 
 
 def test_kind_rules_can_classify_files_without_records_and_skip_incomplete_ones(library):
@@ -229,7 +230,7 @@ def test_kind_rules_can_classify_files_without_records_and_skip_incomplete_ones(
     library.remember({"part.mp3": {"source_url": "https://e.com", "complete": False}})
     result = library.apply_auto_rule_to_existing(rule_id, [("loose.mp3", "audio"), ("part.mp3", "audio")],
                                                  dry_run=False)
-    assert result == {"matched": 1, "changed": 1}
+    assert result == {"matched": 1, "changed": 1, "paths": ["loose.mp3"], "export": False}
     assert library.load()["files"]["loose.mp3"] == {"favorite": True}
 
 
