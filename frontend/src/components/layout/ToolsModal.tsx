@@ -3,6 +3,7 @@ import { useI18n } from '../../i18n'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { AutomationApi } from './AutomationApi'
+import { RemoteAccess } from './RemoteAccess'
 import { DownloadHooks } from './DownloadHooks'
 import { MediaExportSettings } from './MediaExportSettings'
 import { ExtensionAccess } from './ExtensionAccess'
@@ -51,6 +52,7 @@ export function ToolsModal(p: Props) {
         <ExtensionAccess />
         <DownloadHooks />
         <AutomationApi />
+        <RemoteAccess />
         <MediaExportSettings />
       </div>
     </Modal>

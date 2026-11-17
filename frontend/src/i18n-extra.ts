@@ -2321,6 +2321,70 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Check frequency saved': ['检查频率已保存', '檢查頻率已儲存', '確認間隔を保存しました'],
   'Download schedule': ['下载时间表', '下載時間表', 'ダウンロードスケジュール'],
   'Automation API': ['自动化 API', '自動化 API', '自動化 API'],
+  'Remote access': ['远程访问', '遠端存取', 'リモートアクセス'],
+  'Lets phones you pair add downloads, follow the queue and play your Library. Paired phones cannot change settings, delete files or see your cookies. Use Tailscale to reach this computer securely from anywhere, or your home Wi-Fi.':
+    [
+      '让配对过的手机添加下载、查看队列并播放资料库。配对的手机不能更改设置、删除文件或查看 cookies。可以用 Tailscale 从任何地方安全地连接这台电脑，也可以用家里的 Wi-Fi。',
+      '讓配對過的手機新增下載、查看佇列並播放資料庫。配對的手機不能變更設定、刪除檔案或查看 cookies。可以用 Tailscale 從任何地方安全地連線這台電腦，也可以用家裡的 Wi-Fi。',
+      'ペアリングしたスマートフォンから、ダウンロードの追加、キューの確認、ライブラリの再生ができます。設定の変更、ファイルの削除、Cookie の閲覧はできません。Tailscale を使えばどこからでも安全に接続でき、自宅の Wi-Fi でも使えます。',
+    ],
+  'Off. Phones cannot connect.': [
+    '已关闭，手机无法连接。',
+    '已關閉，手機無法連線。',
+    'オフ。スマートフォンは接続できません。',
+  ],
+  'Could not start: port {port} is in use. Choose another port.': [
+    '无法启动：端口 {port} 已被占用，请换一个端口。',
+    '無法啟動：連接埠 {port} 已被佔用，請換一個連接埠。',
+    '開始できません：ポート {port} は使用中です。別のポートを選んでください。',
+  ],
+  'Could not start: this computer no longer has the address {address}. Choose another.': [
+    '无法启动：这台电脑已没有地址 {address}，请重新选择。',
+    '無法啟動：這台電腦已沒有位址 {address}，請重新選擇。',
+    '開始できません：このパソコンにはアドレス {address} がありません。別のものを選んでください。',
+  ],
+  'On. Open on your phone: {urls}': [
+    '已开启。在手机上打开：{urls}',
+    '已開啟。在手機上開啟：{urls}',
+    'オン。スマートフォンで開く：{urls}',
+  ],
+  'On, for this computer only (port {port}). Point Tailscale Serve or another reverse proxy at it, then add its host name below.':
+    [
+      '已开启，仅限这台电脑（端口 {port}）。请把 Tailscale Serve 或其他反向代理指向它，并在下方添加其主机名。',
+      '已開啟，僅限這台電腦（連接埠 {port}）。請將 Tailscale Serve 或其他反向代理指向它，並在下方新增其主機名稱。',
+      'オン（このパソコンのみ、ポート {port}）。Tailscale Serve などのリバースプロキシをここに向け、下にそのホスト名を追加してください。',
+    ],
+  'Home network connections are not encrypted: anyone on the same Wi-Fi could read what a phone sends and watches. Use this only on a network you trust, or use Tailscale.':
+    [
+      '家庭网络连接没有加密：同一 Wi-Fi 上的任何人都可能看到手机发送和观看的内容。请只在信任的网络中使用，或改用 Tailscale。',
+      '家用網路連線沒有加密：同一 Wi-Fi 上的任何人都可能看到手機傳送和觀看的內容。請只在信任的網路中使用，或改用 Tailscale。',
+      'ホームネットワークの接続は暗号化されません。同じ Wi-Fi の誰でも、スマートフォンが送信・視聴する内容を読み取れる可能性があります。信頼できるネットワークでのみ使うか、Tailscale を使ってください。',
+    ],
+  'Turn on remote access': ['开启远程访问', '開啟遠端存取', 'リモートアクセスをオン'],
+  'Turn off remote access': ['关闭远程访问', '關閉遠端存取', 'リモートアクセスをオフ'],
+  'Where phones connect': ['手机连接的位置', '手機連線的位置', 'スマートフォンの接続先'],
+  'This computer only (for Tailscale or a reverse proxy)': [
+    '仅这台电脑（用于 Tailscale 或反向代理）',
+    '僅這台電腦（用於 Tailscale 或反向代理）',
+    'このパソコンのみ（Tailscale またはリバースプロキシ用）',
+  ],
+  'Home network: {address}': ['家庭网络：{address}', '家用網路：{address}', 'ホームネットワーク：{address}'],
+  Port: ['端口', '連接埠', 'ポート'],
+  'Host names that may connect (optional)': [
+    '允许连接的主机名（可选）',
+    '允許連線的主機名稱（選填）',
+    '接続を許可するホスト名（任意）',
+  ],
+  'Saved.': ['已保存。', '已儲存。', '保存しました。'],
+  'Open the address on your phone and enter this code. It works once, for 5 minutes.': [
+    '在手机上打开地址并输入这个配对码。它只能使用一次，5 分钟内有效。',
+    '在手機上開啟位址並輸入這個配對碼。它只能使用一次，5 分鐘內有效。',
+    'スマートフォンでアドレスを開き、このコードを入力してください。1回だけ、5分間有効です。',
+  ],
+  'Pair a phone': ['配对手机', '配對手機', 'スマートフォンをペアリング'],
+  'Paired phones': ['已配对的手机', '已配對的手機', 'ペアリング済みのスマートフォン'],
+  'Last used {date}': ['上次使用：{date}', '上次使用：{date}', '最終使用：{date}'],
+  'Remove {name}': ['移除 {name}', '移除 {name}', '{name} を削除'],
   Transcripts: ['转录', '轉錄', '文字起こし'],
   Transcribe: ['转录为文字', '轉錄為文字', '文字起こし'],
   'Transcribe {name}': ['把 {name} 转录为文字', '把 {name} 轉錄為文字', '{name} を文字起こし'],

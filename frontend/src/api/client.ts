@@ -267,6 +267,33 @@ export interface AutomationApiStatus {
 export const getAutomationApi = () => api<AutomationApiStatus>('/api/automation-api')
 export const changeAutomationApi = (action: 'enable' | 'disable' | 'new_token') =>
   post<AutomationApiStatus>('/api/automation-api', { action })
+export interface RemoteDevice {
+  id: string
+  name: string
+  created: number
+  last_seen: number
+}
+export interface RemoteAccessStatus {
+  enabled: boolean
+  running: boolean
+  /** "address_missing" or "port_busy" when the listener could not start. */
+  error: string
+  /** "loopback" for this computer only, or one of `addresses`. */
+  bind: string
+  port: number
+  trusted_hosts: string[]
+  addresses: string[]
+  urls: string[]
+  devices: RemoteDevice[]
+  pairing: { code: string; expires: number } | null
+}
+export type RemoteAccessChange =
+  | { action: 'enable' | 'disable' | 'new_code' | 'cancel_code' }
+  | { action: 'revoke'; device: string }
+  | { action: 'configure'; bind: string; port: number; trusted_hosts: string[] }
+export const getRemoteAccess = () => api<RemoteAccessStatus>('/api/remote-access')
+export const changeRemoteAccess = (change: RemoteAccessChange) =>
+  post<RemoteAccessStatus>('/api/remote-access', change)
 export const getHooks = () => api<HooksStatus>('/api/hooks')
 export const openHooksConfig = () => post<HooksStatus>('/api/hooks/open-config')
 export const testNotifications = () => post<NotificationTestResponse>('/api/hooks/test-notifications')
