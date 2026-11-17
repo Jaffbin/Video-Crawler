@@ -14,5 +14,6 @@ to explain choices that already exist. New decisions get a new numbered file.
 | [0006](0006-validate-on-both-sides.md) | Validate input in both Python and TypeScript | Accepted |
 | [0007](0007-commit-the-built-frontend.md) | Commit the built frontend and verify it in CI | Accepted |
 | [0008](0008-mcp-server-as-api-client.md) | Build the MCP server as an optional, loopback-only client of the automation API | Accepted |
+| [0009](0009-remote-access-listener.md) | Remote access through a separate listener with paired devices | Accepted |
 
 Each record follows: Context → Decision → Consequences (good and bad) → Alternatives considered.
