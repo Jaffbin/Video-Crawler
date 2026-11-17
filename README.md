@@ -78,6 +78,8 @@ access controls.
 - Run in a native pywebview window, a normal browser tab, or directly from the CLI.
 - Let scripts queue downloads through an opt-in local automation API ([OpenAPI spec](docs/openapi.json)),
   and let AI agents such as Claude Code do the same through the optional MCP server (`grab_mcp.py`).
+- Pair a phone to send links to the queue, follow downloads and play your Library, over Tailscale or
+  your home Wi-Fi. Off by default; paired phones cannot change settings or files.
 
 </details>
 
@@ -305,6 +307,7 @@ flowchart LR
     UI["React UI<br/>(pywebview window or browser tab)"]
     EXT[Chrome extension]
     AUTO["Automation API clients<br/>(scripts, MCP server for AI agents)"]
+    PHONE["Paired phone<br/>(Tailscale or home Wi-Fi)"]
     subgraph Server["webui.py on 127.0.0.1 (standard-library HTTP server)"]
         ROUTES["Routes<br/>webui_routes_*.py"]
         JOBS["Download workers<br/>queue, schedule, subscriptions"]
@@ -316,6 +319,7 @@ flowchart LR
     UI -- "page token + session cookie" --> ROUTES
     EXT -- "opt-in" --> ROUTES
     AUTO -- "own token, /api/v1" --> ROUTES
+    PHONE -- "device cookie, separate listener" --> ROUTES
     ROUTES --> JOBS
     ROUTES --> LIB
     JOBS --> YTDLP
@@ -357,6 +361,7 @@ grab_download.py Structured yt-dlp item failure tracking for selective retries.
 grab_images.py   Bounded, atomic downloads of original-format images and video covers.
 grab_library.py  Local media metadata and reversible management of media and companion files.
 grab_mcp.py      Optional MCP server for AI agents; a loopback-only client of the automation API.
+grab_remote.py   Remote access for phones: pairing codes, device tokens and request checks.
 grab_models.py   Job and subscription state, views, and persistence schemas.
 grab_sites.py    Small isolated adapters for sites that need a stable non-generic fallback.
 grab_state.py    Thread-safe job and subscription registries.

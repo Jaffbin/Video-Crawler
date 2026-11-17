@@ -808,6 +808,33 @@ computer and refuses any other `VG_API_URL`.
 Video titles and error messages come from websites. The tools tell the agent to treat them as data,
 not instructions, but review what an agent queues as you would any automation.
 
+## Remote access from a phone
+
+A phone you pair can send links to the queue, follow and cancel or retry downloads, browse your
+Library and play videos, music and pictures. It cannot change settings, delete or rename files, see
+cookies or pair other phones. Remote access is off by default.
+
+1. Open **Settings and help → Remote access → Turn on remote access**.
+2. Choose **Where phones connect**:
+   - **This computer only (for Tailscale or a reverse proxy)** is the safer choice. Install
+     [Tailscale](https://tailscale.com) on the computer and the phone, run
+     `tailscale serve --bg 8766` on the computer, and add the `….ts.net` name it prints under
+     **Host names that may connect**. The phone then opens `https://<name>.ts.net/`, encrypted and
+     reachable only from your own devices, at home or away.
+   - **Home network: 192.168.…** lets a phone on the same Wi-Fi open `http://192.168.…:8766/`
+     without extra software. This connection is not encrypted: anyone on the same network could
+     read what the phone sends and watches, so use it only on a network you trust.
+3. Choose **Pair a phone**. Open the address on the phone and enter the code shown on the computer.
+   A code works once, for 5 minutes, and is discarded after 5 wrong tries.
+
+Paired phones are listed with when they were last used; **Remove** ends a phone's access
+immediately. On the phone, **Forget this phone** does the same. Up to 10 phones can be paired.
+If the port is busy or the chosen network address is gone (for example on another Wi-Fi), Settings
+says so; choose another port or address and **Save**.
+
+A link can also be passed to the phone page as `/?url=<link>` (for example from an iOS Shortcut or
+an Android share app). It fills the box; you still tap **Send**.
+
 ## yt-dlp plugins
 
 yt-dlp plugins, such as a PO Token provider for YouTube or an extractor for an extra site, work in
