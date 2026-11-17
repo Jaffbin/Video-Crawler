@@ -13,5 +13,6 @@ to explain choices that already exist. New decisions get a new numbered file.
 | [0005](0005-hooks-from-hand-edited-file.md) | Configure hooks and notifications only in a hand-edited file | Accepted |
 | [0006](0006-validate-on-both-sides.md) | Validate input in both Python and TypeScript | Accepted |
 | [0007](0007-commit-the-built-frontend.md) | Commit the built frontend and verify it in CI | Accepted |
+| [0008](0008-mcp-server-as-api-client.md) | Build the MCP server as an optional, loopback-only client of the automation API | Accepted |
 
 Each record follows: Context → Decision → Consequences (good and bad) → Alternatives considered.

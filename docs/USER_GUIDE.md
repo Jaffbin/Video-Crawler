@@ -783,6 +783,31 @@ The app's own page and the Chrome extension cannot turn it on or read its token.
 call it, because it sends no cross-origin permission headers. Downloads added this way use the
 same rules, schedule, hooks and notifications as any other download.
 
+The full request and response format is in [openapi.json](openapi.json) (OpenAPI 3.1).
+
+### AI agents (MCP)
+
+AI agents that support the Model Context Protocol, such as Claude Code, Claude Desktop or Cursor,
+can use the automation API through the optional MCP server. It offers three tools:
+`queue_download`, `get_job` and `get_queue_status`. It can do only what the API token allows and
+cannot read your Library.
+
+1. Turn on the automation API and copy the token, as above.
+2. Install the optional package from the project folder: `pip install -e ".[mcp]"`.
+3. Add the server to your agent. For Claude Code:
+
+```bash
+claude mcp add --transport stdio --env VG_API_TOKEN=vg_… video-grabber -- python /path/to/grab_mcp.py
+```
+
+Other clients take the same command (`python /path/to/grab_mcp.py`) and the environment variable
+`VG_API_TOKEN`. If Settings shows a port other than 8765, also set
+`VG_API_URL=http://127.0.0.1:<port>/api/v1`. The server sends the token only to an address on this
+computer and refuses any other `VG_API_URL`.
+
+Video titles and error messages come from websites. The tools tell the agent to treat them as data,
+not instructions, but review what an agent queues as you would any automation.
+
 ## yt-dlp plugins
 
 yt-dlp plugins, such as a PO Token provider for YouTube or an extractor for an extra site, work in

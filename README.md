@@ -76,6 +76,8 @@ access controls.
 - Get an app-wide reminder (and a message on configured notification channels) when YouTube stops
   accepting the cookies your downloads use; it clears after new cookies or a working download.
 - Run in a native pywebview window, a normal browser tab, or directly from the CLI.
+- Let scripts queue downloads through an opt-in local automation API ([OpenAPI spec](docs/openapi.json)),
+  and let AI agents such as Claude Code do the same through the optional MCP server (`grab_mcp.py`).
 
 </details>
 
@@ -302,7 +304,7 @@ system-player/download fallbacks remain available, and external playback does no
 flowchart LR
     UI["React UI<br/>(pywebview window or browser tab)"]
     EXT[Chrome extension]
-    AUTO[Automation API clients]
+    AUTO["Automation API clients<br/>(scripts, MCP server for AI agents)"]
     subgraph Server["webui.py on 127.0.0.1 (standard-library HTTP server)"]
         ROUTES["Routes<br/>webui_routes_*.py"]
         JOBS["Download workers<br/>queue, schedule, subscriptions"]
@@ -354,6 +356,7 @@ grab_config.py   Validated Web UI startup configuration and CLI parsing.
 grab_download.py Structured yt-dlp item failure tracking for selective retries.
 grab_images.py   Bounded, atomic downloads of original-format images and video covers.
 grab_library.py  Local media metadata and reversible management of media and companion files.
+grab_mcp.py      Optional MCP server for AI agents; a loopback-only client of the automation API.
 grab_models.py   Job and subscription state, views, and persistence schemas.
 grab_sites.py    Small isolated adapters for sites that need a stable non-generic fallback.
 grab_state.py    Thread-safe job and subscription registries.

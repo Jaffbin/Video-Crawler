@@ -15,6 +15,7 @@ npm ci
 ```
 
 ffmpeg is optional for most tests, but the local media download tests use it when it is available.
+Install `".[dev,mcp]"` to also run the MCP server tool tests; without the extra they are skipped.
 
 ## Checks
 
