@@ -20,27 +20,21 @@ It covers what exists in the code today. Planned remote access is out of scope u
 
 ```mermaid
 flowchart LR
-    subgraph Untrusted
-        WEB[Any web page in the user's browser]
-        SITE[Download sites and their metadata]
-        LOCALPROC[Other programs on this computer]
-    end
-    subgraph Semi-trusted
-        EXT[Chrome extension, when allowed]
-        API[Automation API client with its own token]
-    end
-    subgraph Trusted
-        UI[App window / launched tab]
-        SERVER[webui.py on 127.0.0.1]
-        FS[(Download folder, settings, cookies)]
-    end
-    WEB -- blocked: Host check, token, CSP --> SERVER
-    LOCALPROC -- locked page without launch secret --> SERVER
-    EXT -- X-Grab-Client + opt-in switch --> SERVER
-    API -- /api/v1 only, bearer token --> SERVER
-    UI -- page token + session cookie --> SERVER
-    SITE -- titles, URLs, files --> SERVER
+    UI["Trusted: app window or launched tab"]
+    EXT["Semi-trusted: Chrome extension, when allowed"]
+    API["Semi-trusted: automation API client"]
+    WEB["Untrusted: any web page in the browser"]
+    LOCALPROC["Untrusted: other local programs"]
+    SERVER["webui.py on 127.0.0.1"]
+    FS[("Download folder, settings, cookies")]
+    SITE["Untrusted: download sites and their metadata"]
+    UI -- "page token and session cookie" --> SERVER
+    EXT -- "opt-in switch, then page token" --> SERVER
+    API -- "own token, /api/v1 only" --> SERVER
+    WEB -. "blocked: Host check, token, CSP" .-> SERVER
+    LOCALPROC -. "locked page without launch secret" .-> SERVER
     SERVER --> FS
+    SITE -- "titles, URLs, media via yt-dlp" --> SERVER
 ```
 
 ## Threats and mitigations

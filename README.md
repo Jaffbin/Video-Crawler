@@ -1,5 +1,7 @@
 # Video Grabber
 
+[![CI](https://github.com/Jaffbin/Video-Crawler/actions/workflows/ci.yml/badge.svg)](https://github.com/Jaffbin/Video-Crawler/actions/workflows/ci.yml)
+
 Save videos, audio and images from the web to your own computer. Private, no account, and kept
 organized in a Library you control. Windows app and Python tool, powered by yt-dlp and ffmpeg.
 
@@ -293,6 +295,42 @@ includes both. The built-in player resumes unfinished playback and saves positio
 on pause and when closing details. **Continue watching / listening** filters saved unfinished
 progress. Opening details alone does not reset progress. Browser codec support limits previews;
 system-player/download fallbacks remain available, and external playback does not report progress.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI["React UI<br/>(pywebview window or browser tab)"]
+    EXT[Chrome extension]
+    AUTO[Automation API clients]
+    subgraph Server["webui.py on 127.0.0.1 (standard-library HTTP server)"]
+        ROUTES["Routes<br/>webui_routes_*.py"]
+        JOBS["Download workers<br/>queue, schedule, subscriptions"]
+        LIB["Library<br/>grab_library.py, organizer, auto rules"]
+        POST["After download<br/>transcripts, media export, hooks, notifications"]
+    end
+    YTDLP[yt-dlp + ffmpeg]
+    STORE[("Download folder<br/>SQLite + JSON metadata, Recovery")]
+    UI -- "page token + session cookie" --> ROUTES
+    EXT -- "opt-in" --> ROUTES
+    AUTO -- "own token, /api/v1" --> ROUTES
+    ROUTES --> JOBS
+    ROUTES --> LIB
+    JOBS --> YTDLP
+    JOBS --> POST
+    LIB --> STORE
+    POST --> STORE
+```
+
+One local Python process serves the prebuilt interface and runs downloads in worker threads; there
+is no hosted service. Design notes:
+
+- [Security model](docs/SECURITY_MODEL.md): what the local server protects, from whom, and how.
+- [Architecture decision records](docs/adr/README.md): why the standard-library server, SQLite
+  with a JSON mirror, Recovery instead of delete, and other choices.
+- Engineering write-ups: [rejected POSTs that lost their response](docs/engineering/windows-rejected-post-resets.md)
+  and [telling whether a file changed on Windows](docs/engineering/windows-file-identity.md).
+- [Performance review](docs/PERFORMANCE_REVIEW.md): measured bottlenecks and what changed.
 
 ## Tests
 
