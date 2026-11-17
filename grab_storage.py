@@ -93,7 +93,9 @@ class SqliteLibraryStore:
                 need_sync = True
             else:
                 try:
-                    if json_file.stat().st_mtime_ns > db_file.stat().st_mtime_ns:
+                    # The JSON document is written last (and alone by backup restore); equal times
+                    # within one clock tick must still count as newer, or a restore looks lost.
+                    if json_file.stat().st_mtime_ns >= db_file.stat().st_mtime_ns:
                         need_sync = True
                 except OSError:
                     pass
@@ -158,19 +160,22 @@ class SqliteLibraryStore:
                 # older versions, which never delete meta rows, keep them intact.
                 cur.execute("SELECT value FROM meta WHERE key = 'auto_rules'")
                 row = cur.fetchone()
-                try:
-                    auto_rules = json.loads(row[0]) if row and row[0] else {}
-                except ValueError:
-                    auto_rules = {}
 
-                return {
+                result = {
                     "version": version,
                     "files": files,
                     "trash": trash,
                     "collections": collections,
                     "smart_collections": smart_collections,
-                    "auto_rules": auto_rules if isinstance(auto_rules, dict) else {},
                 }
+                # Only when saved, so this path returns exactly what the JSON mirror path returns.
+                if row:
+                    try:
+                        auto_rules = json.loads(row[0]) if row[0] else {}
+                    except ValueError:
+                        auto_rules = {}
+                    result["auto_rules"] = auto_rules if isinstance(auto_rules, dict) else {}
+                return result
         except (sqlite3.Error, OSError):
             return default
 

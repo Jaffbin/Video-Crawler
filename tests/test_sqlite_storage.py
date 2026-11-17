@@ -80,3 +80,34 @@ def test_sqlite_store_with_media_library(tmp_path):
     assert rec["note"] == "sample note"
     assert rec["playback"]["position"] == 45
     assert (tmp_path / ".grab-library.db").is_file()
+
+
+def test_both_load_paths_return_the_same_document(tmp_path):
+    """Load reads the JSON mirror when it is newer, the database otherwise; the result must not differ."""
+    import os
+
+    store = SqliteLibraryStore(lambda: tmp_path, threading.Lock())
+    sample = {"version": 1, "files": {}, "trash": {}, "collections": {}, "smart_collections": {}}
+    store.save(sample)
+    json_file, db_file = store._json_path(), store._db_path()
+    os.utime(json_file, ns=(1, 1_000_000_000))  # database newer: read from the database
+    assert store.load() == sample
+    store.save({**sample, "auto_rules": {"a" * 32: {"name": "R"}}})
+    os.utime(json_file, ns=(1, 1_000_000_000))
+    assert store.load()["auto_rules"] == {"a" * 32: {"name": "R"}}
+    os.utime(db_file, ns=(1, 1_000_000_000))  # mirror newer: read the JSON mirror
+    assert store.load()["auto_rules"] == {"a" * 32: {"name": "R"}}
+
+
+def test_a_json_only_write_in_the_same_clock_tick_is_not_lost(tmp_path):
+    """Backup restore replaces only the JSON document; equal timestamps must still be read."""
+    import json
+    import os
+
+    store = SqliteLibraryStore(lambda: tmp_path, threading.Lock())
+    store.save({"version": 1, "files": {}, "trash": {}, "collections": {}, "smart_collections": {}})
+    restored = {"version": 1, "files": {}, "trash": {}, "collections": {"m" * 32: "Music"}, "smart_collections": {}}
+    store._json_path().write_text(json.dumps(restored), encoding="utf-8")
+    stamp = store._db_path().stat().st_mtime_ns
+    os.utime(store._json_path(), ns=(stamp, stamp))
+    assert store.load()["collections"] == {"m" * 32: "Music"}
