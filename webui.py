@@ -69,6 +69,8 @@ import webui_routes_subscriptions  # noqa: E402
 import webui_routes_system  # noqa: E402
 import webui_routes_api  # noqa: E402
 import webui_routes_transcripts  # noqa: E402
+import webui_routes_remote  # noqa: E402
+import grab_remote  # noqa: E402
 import grab_transcribe  # noqa: E402
 import grab_api  # noqa: E402
 from grab_subscriptions import (  # noqa: E402
@@ -1475,6 +1477,67 @@ def change_api_settings(action: str) -> dict:
     return {**api_settings_view(), **({"token": token} if token else {})}
 
 
+# ───────────────────────── Remote access ─────────────────────────
+REMOTE_PAIRING = grab_remote.Pairing()
+REMOTE_LOCK = threading.Lock()  # serializes changes to remote.json (pairing, revoking, last seen)
+
+
+def _remote_store() -> JsonStore:
+    return JsonStore(lambda: CONFIG_DIR / "remote.json", SETTINGS_LOCK)
+
+
+def remote_settings() -> dict:
+    return grab_remote.settings(_remote_store().load({}))
+
+
+def save_remote_settings(saved: dict) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _remote_store().save(saved)
+
+
+def remote_access_view() -> dict:
+    saved = remote_settings()
+    port = REMOTE.port if REMOTE.running else saved["port"]
+    return {"enabled": saved["enabled"], "running": REMOTE.running, "error": REMOTE.error,
+            "bind": saved["bind"], "port": saved["port"], "trusted_hosts": saved["trusted_hosts"],
+            "addresses": grab_remote.local_addresses(), "urls": grab_remote.urls(saved, port),
+            "devices": [grab_remote.device_view(device) for device in saved["devices"]],
+            "pairing": REMOTE_PAIRING.active() if REMOTE.running else None}
+
+
+def change_remote_access(body: dict) -> dict:
+    """enable / disable / configure / new_code / cancel_code / revoke, from the app window only."""
+    action = body.get("action")
+    with REMOTE_LOCK:
+        saved = remote_settings()
+        if action in ("enable", "disable"):
+            saved["enabled"] = action == "enable"
+            save_remote_settings(saved)
+            REMOTE_PAIRING.clear()
+            REMOTE.apply(saved)
+        elif action == "configure":
+            saved = grab_remote.configure(saved, body, grab_remote.local_addresses())
+            save_remote_settings(saved)
+            REMOTE_PAIRING.clear()
+            REMOTE.apply(saved)
+        elif action == "new_code":
+            if not REMOTE.running:
+                raise ValueError("Turn on remote access first.")
+            REMOTE_PAIRING.new_code()
+        elif action == "cancel_code":
+            REMOTE_PAIRING.clear()
+        elif action == "revoke":
+            device_id = body.get("device")
+            remaining = [device for device in saved["devices"] if device["id"] != device_id]
+            if len(remaining) == len(saved["devices"]):
+                raise ValueError("That device is not paired.")
+            saved["devices"] = remaining
+            save_remote_settings(saved)
+        else:
+            raise ValueError("Choose enable, disable, configure, new_code, cancel_code or revoke.")
+    return remote_access_view()
+
+
 # ───────────────────────── Media server export ─────────────────────────
 def _media_export_store() -> JsonStore:
     return JsonStore(lambda: CONFIG_DIR / "media-export.json", SETTINGS_LOCK)
@@ -2026,6 +2089,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if webui_routes_api.settings_get(sys.modules[__name__], self, u.path):
             return
+        if webui_routes_remote.settings_get(sys.modules[__name__], self, u.path):
+            return
         if webui_routes_transcripts.transcripts_get(sys.modules[__name__], self, u.path, q):
             return
         if self._handle_library_get(u.path):
@@ -2089,6 +2154,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if webui_routes_api.settings_post(sys.modules[__name__], self, u.path, body):
             return
+        if webui_routes_remote.settings_post(sys.modules[__name__], self, u.path, body):
+            return
         if webui_routes_transcripts.transcripts_post(sys.modules[__name__], self, u.path, body):
             return
 
@@ -2142,6 +2209,112 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     # Windows SO_REUSEADDR allows two processes to silently bind to the same port, so only enable on other OS
     allow_reuse_address = not sys.platform.startswith("win")
+
+
+class RemoteHandler(Handler):
+    """The phone-facing listener (docs/adr/0009-remote-access-listener.md).
+
+    Shares output, body and file helpers with Handler but none of its routes or tokens: a paired
+    device's cookie opens only the routes in webui_routes_remote.
+    """
+    server_version = "grab-remote"
+
+    def _remote_guard(self) -> dict | None:
+        saved = remote_settings()
+        if (not saved["enabled"] or not grab_remote.client_allowed(self.client_address[0], saved)
+                or not grab_remote.host_allowed(self.headers.get("Host"), saved)):
+            self._discard_rejected_body()
+            self._json({"error": "forbidden"}, 403)
+            return None
+        return saved
+
+    def remote_device(self, saved: dict) -> dict | None:
+        try:
+            jar = http.cookies.SimpleCookie(self.headers.get("Cookie") or "")
+        except http.cookies.CookieError:
+            return None
+        morsel = jar.get(grab_remote.COOKIE)
+        device = grab_remote.find_device(morsel.value if morsel else None, saved["devices"])
+        if device and time.time() - device["last_seen"] > grab_remote.LAST_SEEN_INTERVAL:
+            with REMOTE_LOCK:
+                current = remote_settings()
+                for item in current["devices"]:
+                    if item["id"] == device["id"]:
+                        item["last_seen"] = time.time()
+                try:
+                    save_remote_settings(current)
+                except OSError:
+                    pass  # A failed "last seen" update must not block the phone.
+        return device
+
+    def do_GET(self):
+        saved = self._remote_guard()
+        if saved is None:
+            return
+        u = urlparse(self.path)
+        webui_routes_remote.remote_get(sys.modules[__name__], self, u.path, parse_qs(u.query), saved)
+
+    def do_POST(self):
+        saved = self._remote_guard()
+        if saved is None:
+            return
+        origin = self.headers.get("Origin")
+        if (self.headers.get("X-VG-Remote") != "1"
+                or "application/json" not in (self.headers.get("Content-Type") or "")
+                or (origin is not None and urlparse(origin).netloc.lower() != (self.headers.get("Host") or "").lower())):
+            self._discard_rejected_body()
+            return self._json({"error": "forbidden"}, 403)
+        webui_routes_remote.remote_post(sys.modules[__name__], self, urlparse(self.path).path, self._body(), saved)
+
+
+class RemoteListener:
+    """Starts, stops and restarts the remote listener to match the saved settings."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._server: Server | None = None
+        self._thread: threading.Thread | None = None
+        self.error = ""
+        self.port = 0
+
+    @property
+    def running(self) -> bool:
+        return self._server is not None
+
+    def apply(self, saved: dict, *, port: int | None = None) -> None:
+        with self._lock:
+            self._stop()
+            self.error = ""
+            if not saved["enabled"]:
+                return
+            if saved["bind"] != grab_remote.LOOPBACK and saved["bind"] not in grab_remote.local_addresses():
+                self.error = "address_missing"
+                return
+            try:
+                srv = Server((grab_remote.bind_address(saved["bind"]), saved["port"] if port is None else port),
+                             RemoteHandler)
+            except OSError:
+                self.error = "port_busy"
+                return
+            self._server, self.port = srv, srv.server_port
+            self._thread = threading.Thread(target=srv.serve_forever, name="remote-server", daemon=True)
+            self._thread.start()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stop()
+
+    def _stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+            if self._thread is not None:
+                self._thread.join(timeout=2)
+        self._server = self._thread = None
+        self.port = 0
+
+
+REMOTE = RemoteListener()
 
 
 # ───────────────────────── Page ─────────────────────────
@@ -2265,6 +2438,12 @@ def main(argv=None) -> None:
     TRANSCRIBER.start()
     for thread in [*worker_threads, scheduler_thread, server_thread]:
         thread.start()
+    REMOTE.apply(remote_settings())
+    if REMOTE.running:
+        print("Remote access is on: " + (", ".join(grab_remote.urls(remote_settings(), REMOTE.port))
+                                         or f"127.0.0.1:{REMOTE.port} (for a reverse proxy)"))
+    elif REMOTE.error:
+        print(f"Remote access could not start ({REMOTE.error}). Check it in Settings and help.")
     try:
         if ui_mode == "window":
             print("Closing the window asks to run in the tray or exit; change this in Close behavior."
@@ -2292,6 +2471,7 @@ def main(argv=None) -> None:
                     job.resume_pending = True
                     job.cancel.set()
         save_history()
+        REMOTE.stop()
         srv.shutdown()
         srv.server_close()
         for thread in [*worker_threads, scheduler_thread, server_thread]:
