@@ -31,6 +31,7 @@ import {
   trashFile,
   organizeFiles,
   transcribeFiles,
+  exportToMediaServer,
 } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
 import { formatBytes, formatDate, formatDuration } from '../../lib/utils'
@@ -787,6 +788,33 @@ export function FileGallery({
               >
                 {t('Organize selected collections')}
               </Button>
+              {chosen.some((file) => fileKind(file) === 'video') && (
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    exportToMediaServer(chosen.map((file) => file.path))
+                      .then((result) =>
+                        onToast(
+                          t(
+                            'Exported {exported}, already there {existing}, skipped {skipped}, failed {failed}',
+                            {
+                              exported: result.exported,
+                              existing: result.existing,
+                              skipped: result.skipped,
+                              failed: result.failed.length,
+                            },
+                          ),
+                          result.failed.length > 0,
+                        ),
+                      )
+                      .catch((e: unknown) =>
+                        onToast(t(e instanceof Error ? e.message : 'That did not work'), true),
+                      )
+                  }
+                >
+                  {t('Export selected to media server')}
+                </Button>
+              )}
               <Button
                 disabled={busy || editingBlocked}
                 onClick={() => {

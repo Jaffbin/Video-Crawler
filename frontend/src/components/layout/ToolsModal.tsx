@@ -4,6 +4,7 @@ import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { AutomationApi } from './AutomationApi'
 import { DownloadHooks } from './DownloadHooks'
+import { MediaExportSettings } from './MediaExportSettings'
 import { ExtensionAccess } from './ExtensionAccess'
 
 interface Props {
@@ -50,6 +51,7 @@ export function ToolsModal(p: Props) {
         <ExtensionAccess />
         <DownloadHooks />
         <AutomationApi />
+        <MediaExportSettings />
       </div>
     </Modal>
   )

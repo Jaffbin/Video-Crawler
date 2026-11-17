@@ -679,6 +679,49 @@ Telegram and ntfy receive only the title, the video title or link, and for failu
 **Send a test notification** in Settings checks every channel even while `enabled` is false.
 Settings shows only each channel's type and host; addresses and tokens never leave the file.
 
+## Export to a media server (Jellyfin, Plex, Emby, Kodi)
+
+Video Grabber can arrange videos so a media server shows them as shows with posters, descriptions
+and episodes. Open **Settings and help → Media server folder** and enter the folder your media
+server watches, for example `D:\Media\YouTube`. It must be outside the download folder. Leave the
+media server set to a "Shows" (TV) library for that folder.
+
+Each channel becomes a show and each year a season:
+
+```
+YouTube/
+└─ Channel name/
+   ├─ tvshow.nfo, poster.jpg
+   └─ Season 2026/
+      ├─ Channel name - S2026E111501 - Video title [id].mp4
+      ├─ Channel name - S2026E111501 - Video title [id].nfo
+      ├─ Channel name - S2026E111501 - Video title [id]-thumb.jpg
+      └─ Channel name - S2026E111501 - Video title [id].en.srt
+```
+
+The episode number is the upload date (month and day) plus a counter. The `.nfo` files carry the
+title, description, upload date and length. Subtitles and transcripts come along.
+
+Choose what to export in any of three places:
+
+- **A subscription**: tick **Export to media server** on its card, and each new video is exported
+  after it downloads.
+- **An auto rule**: tick **Export videos to the media server folder**. New downloads that match are
+  exported; **Apply to existing files** previews how many existing videos would be exported, then
+  exports them when you confirm.
+- **Library**: select videos and choose **Export selected to media server**.
+
+On the same disk, exports are hard links: the same file appears in both places and uses no extra
+space. On another disk (for example a NAS), the file is copied. Video Grabber never overwrites or
+deletes anything in the media server folder. Exporting a video again finds the earlier copy by its
+ID and leaves it alone, so you can repeat an export safely. Deleting or renaming a video in Library
+does not change its exported copy.
+
+Only video is exported; audio and images are skipped, because media servers organize music by its
+tags instead. Downloads made before this version have no recorded channel or upload date, so they
+are grouped under the site name and dated by when they were downloaded. Only the app's own window
+can change the media server folder; the Chrome extension cannot.
+
 ## Transcripts and searching what was said
 
 Video Grabber can turn speech in Library videos and audio into text on this computer, then search

@@ -184,3 +184,40 @@ it('says when every matching file already has what the rule adds', async () => {
   ).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /Update \d+ files/ })).not.toBeInTheDocument()
 })
+
+it('previews and runs a rule that exports videos to the media server', async () => {
+  resetTokenCache()
+  const exporting: AutoRule = {
+    id: 'e'.repeat(32),
+    name: 'To NAS',
+    enabled: true,
+    conditions: { source: 'youtube.com' },
+    actions: { export: true },
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body))
+        return new Response(
+          JSON.stringify(
+            body.action === 'preview_existing'
+              ? { matched: 4, changed: 0, export: 3 }
+              : { matched: 4, changed: 0, export: 3, exported: 3, export_failed: 0 },
+          ),
+        )
+      }
+      return new Response(JSON.stringify({ auto_rules: [exporting] }))
+    }),
+  )
+  const toast = vi.fn()
+  const user = userEvent.setup()
+  render(<AutoRules files={files} collections={[]} onToast={toast} onRefresh={vi.fn()} />)
+  expect(await screen.findByText('When youtube.com, add an export to the media server.')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Apply auto rule To NAS to existing files' }))
+  expect(
+    await screen.findByText('4 files match To NAS; 3 videos will be exported to the media server folder.'),
+  ).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Export 3 videos' }))
+  await waitFor(() => expect(toast).toHaveBeenCalledWith('Exported 3 videos to the media server folder'))
+})

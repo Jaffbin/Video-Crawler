@@ -105,7 +105,7 @@ export interface AutoRule {
   name: string
   enabled: boolean
   conditions: { source?: string; kind?: 'video' | 'audio' | 'image'; format?: string }
-  actions: { tags?: string[]; collections?: string[]; favorite?: boolean }
+  actions: { tags?: string[]; collections?: string[]; favorite?: boolean; export?: boolean }
 }
 
 export interface RecoveryFile {
@@ -330,6 +330,21 @@ export interface Subscription {
   last_filtered: number
   next_check: number | null
   checking: boolean
+  /** Also place new downloads in the media server folder. */
+  export_media?: boolean
+}
+
+export interface MediaExportStatus {
+  folder: string
+  ready: boolean
+  error: string
+}
+
+export interface MediaExportResult {
+  exported: number
+  existing: number
+  skipped: number
+  failed: Array<{ path: string; error: string }>
 }
 
 export interface SubscriptionsResponse {

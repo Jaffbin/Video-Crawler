@@ -176,3 +176,22 @@ describe('SubscriptionCard', () => {
     expect(requests[0].body.filters.include_keywords).toEqual(['cat'])
   })
 })
+
+it('turns media server export on for a subscription', async () => {
+  resetTokenCache()
+  const bodies: unknown[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify(sub({ export_media: true })))
+    }),
+  )
+  const user = userEvent.setup()
+  render(<SubscriptionCard sub={sub()} onChanged={vi.fn()} onToast={vi.fn()} />)
+  const box = screen.getByRole('checkbox', { name: 'Export to media server' })
+  expect(box).not.toBeChecked()
+  await user.click(box)
+  await waitFor(() => expect(bodies).toEqual([{ export_media: true }]))
+  vi.unstubAllGlobals()
+})

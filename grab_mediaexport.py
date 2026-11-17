@@ -40,7 +40,9 @@ def episode_info(record: dict, relative: str, downloaded: float | None = None) -
     """What the export needs from a Library record, with fallbacks for downloads made before the
     app recorded channel and upload date."""
     info = record.get("media_info") if isinstance(record.get("media_info"), dict) else {}
-    show = info.get("channel") or record.get("source") or "Other"
+    # Without a channel, the site name stands in: "www.example.com:8080" becomes "example.com".
+    site = str(record.get("source") or "").lower().split(":", 1)[0].removeprefix("www.")
+    show = info.get("channel") or site or "Other"
     upload = str(info.get("upload_date") or "")
     if re.fullmatch(r"\d{8}", upload):
         date = datetime.date(int(upload[:4]), int(upload[4:6]), int(upload[6:]))
@@ -118,8 +120,6 @@ def episode_nfo(info: dict, season: int, episode: int) -> ET.Element:
         ET.SubElement(root, "runtime").text = str(max(1, round(info["duration"] / 60)))
     unique = ET.SubElement(root, "uniqueid", type=info["site"] or "web", default="true")
     unique.text = info["key"]
-    if info["source_url"]:
-        ET.SubElement(root, "trailer").text = info["source_url"]
     return root
 
 

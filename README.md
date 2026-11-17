@@ -39,6 +39,9 @@ access controls.
 - Keep chapters, optionally save one file per chapter, and mark or remove YouTube sponsor segments
   with SponsorBlock (off by default).
 - Save only part of a video or audio track by start and end time, with exact cuts.
+- Export videos for Jellyfin, Plex, Emby or Kodi (channel as show, year as season, NFO files),
+  from a subscription, an auto rule or a Library selection; hard links on the same disk, copies
+  otherwise, and nothing in the export folder is ever overwritten.
 - Save only a video's cover, or download a direct JPG, PNG, WebP, GIF or AVIF URL in its original format.
 - Filter images in Library and preview them at a fitted or original size; manage them with rename and recovery.
 - Preview titles, thumbnails, duration and available resolutions before downloading; select playlist entries.

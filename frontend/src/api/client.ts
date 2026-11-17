@@ -23,6 +23,8 @@ import type {
   ScheduleView,
   TranscriptionStatus,
   TranscriptResult,
+  MediaExportStatus,
+  MediaExportResult,
 } from '../types/api'
 import { sanitizeOptions } from '../lib/options'
 import type { BrowserPreferences, BackupReview } from '../lib/backup'
@@ -141,7 +143,15 @@ export const changeAutoRule = (
 ) => post<{ id: string; auto_rules: AutoRule[] }>('/api/library/auto-rules', { action, id, rule })
 /** Run one rule over files already in the Library; preview first, then apply. */
 export const applyAutoRuleToExisting = (id: string, preview: boolean) =>
-  post<{ matched: number; changed: number }>('/api/library/auto-rules', {
+  post<{
+    matched: number
+    changed: number
+    /** Videos the rule exports to the media server folder, when it has that action. */
+    export?: number
+    exported?: number
+    export_failed?: number
+    export_error?: string
+  }>('/api/library/auto-rules', {
     action: preview ? 'preview_existing' : 'apply_existing',
     id,
   })
@@ -223,6 +233,11 @@ export const getCookies = () => api<CookieStatus>('/api/cookies')
 export const getAccess = () => api<{ extension: boolean }>('/api/access')
 export const setExtensionAccess = (extension: boolean) =>
   api<{ extension: boolean }>('/api/access', { method: 'POST', body: JSON.stringify({ extension }) })
+export const getMediaExport = () => api<MediaExportStatus>('/api/media-export')
+export const setMediaExportFolder = (folder: string) =>
+  post<MediaExportStatus>('/api/media-export', { action: 'folder', folder })
+export const exportToMediaServer = (paths: string[]) =>
+  post<MediaExportResult>('/api/media-export', { action: 'export', paths })
 export const getTranscription = () => api<TranscriptionStatus>('/api/transcripts')
 export const transcribeFiles = (paths: string[]) =>
   post<TranscriptionStatus & { added: string[]; skipped: string[] }>('/api/transcripts', {
@@ -300,7 +315,9 @@ export const addSubscription = (
   })
 export const updateSubscription = (
   id: string,
-  patch: Partial<Pick<Subscription, 'enabled' | 'backfill' | 'backfill_count' | 'filters'>> & {
+  patch: Partial<
+    Pick<Subscription, 'enabled' | 'backfill' | 'backfill_count' | 'filters' | 'export_media'>
+  > & {
     options?: DownloadOptions
   },
 ) =>

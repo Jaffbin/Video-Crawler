@@ -13,6 +13,7 @@ type Draft = {
   tags: string
   collections: string[]
   favorite: boolean
+  export: boolean
   enabled: boolean
 }
 
@@ -24,6 +25,7 @@ const EMPTY: Draft = {
   tags: '',
   collections: [],
   favorite: false,
+  export: false,
   enabled: true,
 }
 
@@ -38,6 +40,7 @@ function toDraft(rule: AutoRule): Draft {
     tags: (rule.actions.tags ?? []).join(', '),
     collections: rule.actions.collections ?? [],
     favorite: !!rule.actions.favorite,
+    export: !!rule.actions.export,
     enabled: rule.enabled,
   }
 }
@@ -55,6 +58,7 @@ function toRule(draft: Draft): Omit<AutoRule, 'id'> {
   if (tags.length) actions.tags = tags
   if (draft.collections.length) actions.collections = draft.collections
   if (draft.favorite) actions.favorite = true
+  if (draft.export) actions.export = true
   return { name: draft.name.trim(), enabled: draft.enabled, conditions, actions }
 }
 
@@ -81,7 +85,12 @@ export function AutoRules({
   const [draft, setDraft] = useState<Draft>(EMPTY)
   const [editing, setEditing] = useState<string>()
   const [deleting, setDeleting] = useState<AutoRule | null>(null)
-  const [applying, setApplying] = useState<{ rule: AutoRule; matched: number; changed: number } | null>(null)
+  const [applying, setApplying] = useState<{
+    rule: AutoRule
+    matched: number
+    changed: number
+    export?: number
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -139,6 +148,9 @@ export function AutoRules({
         setApplying(null)
         onRefresh?.()
         onToast(t('Updated {count} files', { count: result.changed }))
+        if (result.export_error) onToast(t(result.export_error), true)
+        else if (result.exported !== undefined)
+          onToast(t('Exported {count} videos to the media server folder', { count: result.exported }))
       }
     } catch (reason) {
       setError(t(reason instanceof Error ? reason.message : 'That did not work'))
@@ -180,6 +192,7 @@ export function AutoRules({
     for (const id of rule.actions.collections ?? [])
       parts.push(t('collection {name}', { name: collectionNames.get(id) ?? '' }))
     if (rule.actions.favorite) parts.push(t('favorite'))
+    if (rule.actions.export) parts.push(t('an export to the media server'))
     return parts.join(', ')
   }
 
@@ -263,27 +276,38 @@ export function AutoRules({
           aria-label={t('Apply to existing files')}
         >
           <p className="break-words">
-            {applying.changed
+            {applying.export
               ? t(
-                  '{matched} files match {name}; {changed} of them will change. Nothing is removed and no file is moved.',
+                  '{matched} files match {name}; {export} videos will be exported to the media server folder.',
                   {
                     matched: applying.matched,
-                    changed: applying.changed,
+                    export: applying.export,
                     name: applying.rule.name,
                   },
                 )
-              : t('{matched} files match {name}, and all of them already have what it adds.', {
-                  matched: applying.matched,
-                  name: applying.rule.name,
-                })}
+              : applying.changed
+                ? t(
+                    '{matched} files match {name}; {changed} of them will change. Nothing is removed and no file is moved.',
+                    {
+                      matched: applying.matched,
+                      changed: applying.changed,
+                      name: applying.rule.name,
+                    },
+                  )
+                : t('{matched} files match {name}, and all of them already have what it adds.', {
+                    matched: applying.matched,
+                    name: applying.rule.name,
+                  })}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button disabled={busy} onClick={() => setApplying(null)}>
               {t('Cancel')}
             </Button>
-            {applying.changed > 0 && (
+            {(applying.changed > 0 || !!applying.export) && (
               <Button variant="primary" disabled={busy} onClick={() => void existing(applying.rule, false)}>
-                {t('Update {count} files', { count: applying.changed })}
+                {applying.changed
+                  ? t('Update {count} files', { count: applying.changed })
+                  : t('Export {count} videos', { count: applying.export ?? 0 })}
               </Button>
             )}
           </div>
@@ -421,6 +445,14 @@ export function AutoRules({
                 onChange={(event) => set('favorite', event.target.checked)}
               />
               <span>{t('Mark as favorite')}</span>
+            </label>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={draft.export}
+                onChange={(event) => set('export', event.target.checked)}
+              />
+              <span>{t('Export videos to the media server folder')}</span>
             </label>
           </fieldset>
           <div className="flex flex-wrap gap-2">

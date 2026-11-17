@@ -2206,6 +2206,76 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Split by chapter': ['按章节拆分', '按章節拆分', 'チャプターごとに分割'],
   'Save only a part': ['只保存一段', '只儲存一段', '一部分だけ保存'],
   'Automatic transcription': ['自动转录', '自動轉錄', '自動文字起こし'],
+  'Media server folder': ['媒体服务器文件夹', '媒體伺服器資料夾', 'メディアサーバーのフォルダー'],
+  'Videos are arranged by channel and year with titles, descriptions, covers and subtitles that Jellyfin, Plex, Emby and Kodi read. On the same disk they are hard-linked and use no extra space; on another disk they are copied. Nothing there is overwritten or deleted.':
+    [
+      '视频会按频道和年份整理，并附上 Jellyfin、Plex、Emby、Kodi 能读取的标题、简介、封面和字幕。同一磁盘上使用硬链接，不占额外空间；不同磁盘则复制。不会覆盖或删除那里的任何文件。',
+      '影片會按頻道和年份整理，並附上 Jellyfin、Plex、Emby、Kodi 能讀取的標題、簡介、封面和字幕。同一磁碟上使用硬連結，不佔額外空間；不同磁碟則複製。不會覆寫或刪除那裡的任何檔案。',
+      '動画はチャンネルと年ごとに整理され、Jellyfin・Plex・Emby・Kodi が読めるタイトル・説明・カバー・字幕が付きます。同じディスクならハードリンクで容量を使わず、別のディスクならコピーします。そこにあるファイルを上書き・削除することはありません。',
+    ],
+  Save: ['保存', '儲存', '保存'],
+  'Turn on export for a subscription, in an auto rule, or for selected Library videos.': [
+    '可以在订阅、自动规则中开启导出，或导出媒体库中选中的视频。',
+    '可以在訂閱、自動規則中開啟匯出，或匯出媒體庫中選取的影片。',
+    '購読や自動ルールでエクスポートをオンにするか、ライブラリで選んだ動画をエクスポートできます。',
+  ],
+  'Off. Enter the folder your media server watches.': [
+    '已关闭。请输入媒体服务器监视的文件夹。',
+    '已關閉。請輸入媒體伺服器監看的資料夾。',
+    'オフ。メディアサーバーが監視するフォルダーを入力してください。',
+  ],
+  'Choose a folder for the media server.': [
+    '请选择媒体服务器文件夹。',
+    '請選擇媒體伺服器資料夾。',
+    'メディアサーバー用のフォルダーを選んでください。',
+  ],
+  'Enter the full path of the media server folder.': [
+    '请输入媒体服务器文件夹的完整路径。',
+    '請輸入媒體伺服器資料夾的完整路徑。',
+    'メディアサーバーのフォルダーをフルパスで入力してください。',
+  ],
+  'Choose a folder outside the download folder.': [
+    '请选择下载文件夹以外的文件夹。',
+    '請選擇下載資料夾以外的資料夾。',
+    'ダウンロードフォルダー以外のフォルダーを選んでください。',
+  ],
+  'Choose a media server folder in Settings first.': [
+    '请先在设置中选择媒体服务器文件夹。',
+    '請先在設定中選擇媒體伺服器資料夾。',
+    '先に設定でメディアサーバーのフォルダーを選んでください。',
+  ],
+  'Export to media server': ['导出到媒体服务器', '匯出到媒體伺服器', 'メディアサーバーにエクスポート'],
+  'Export videos to the media server folder': [
+    '把视频导出到媒体服务器文件夹',
+    '把影片匯出到媒體伺服器資料夾',
+    '動画をメディアサーバーのフォルダーにエクスポート',
+  ],
+  'an export to the media server': [
+    '导出到媒体服务器',
+    '匯出到媒體伺服器',
+    'メディアサーバーへのエクスポート',
+  ],
+  '{matched} files match {name}; {export} videos will be exported to the media server folder.': [
+    '有 {matched} 个文件符合「{name}」，其中 {export} 个视频会导出到媒体服务器文件夹。',
+    '有 {matched} 個檔案符合「{name}」，其中 {export} 部影片會匯出到媒體伺服器資料夾。',
+    '{matched} 件のファイルが「{name}」に一致し、{export} 本の動画をメディアサーバーのフォルダーにエクスポートします。',
+  ],
+  'Export {count} videos': ['导出 {count} 个视频', '匯出 {count} 部影片', '{count} 本の動画をエクスポート'],
+  'Exported {count} videos to the media server folder': [
+    '已把 {count} 个视频导出到媒体服务器文件夹',
+    '已把 {count} 部影片匯出到媒體伺服器資料夾',
+    '{count} 本の動画をメディアサーバーのフォルダーにエクスポートしました',
+  ],
+  'Export selected to media server': [
+    '把选中项导出到媒体服务器',
+    '把選取項目匯出到媒體伺服器',
+    '選択項目をメディアサーバーにエクスポート',
+  ],
+  'Exported {exported}, already there {existing}, skipped {skipped}, failed {failed}': [
+    '已导出 {exported} 个，已存在 {existing} 个，跳过 {skipped} 个，失败 {failed} 个',
+    '已匯出 {exported} 個，已存在 {existing} 個，略過 {skipped} 個，失敗 {failed} 個',
+    'エクスポート {exported} 件、既存 {existing} 件、スキップ {skipped} 件、失敗 {failed} 件',
+  ],
   'YouTube signed out the browser cookies used for downloads. Sign in to YouTube in that browser again, then retry.':
     [
       'YouTube 已让下载所用的浏览器 cookie 失效。请在该浏览器中重新登录 YouTube，然后重试。',

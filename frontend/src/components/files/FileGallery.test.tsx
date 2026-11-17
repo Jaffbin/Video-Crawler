@@ -967,3 +967,23 @@ it('queues a transcription from a video’s More menu and offers none for images
   )
   expect(requests).toEqual([{ action: 'start', paths: ['video.mp4'] }])
 })
+
+it('exports selected videos to the media server and reports what happened', async () => {
+  const bodies: unknown[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({ exported: 1, existing: 0, skipped: 1, failed: [] }))
+    }),
+  )
+  const toast = vi.fn()
+  const user = userEvent.setup()
+  render(<FileGallery files={files} windowMode={false} onRefresh={vi.fn()} onToast={toast} />)
+  await user.click(screen.getByRole('button', { name: 'Select this page' }))
+  await user.click(screen.getByRole('button', { name: 'Export selected to media server' }))
+  await waitFor(() =>
+    expect(toast).toHaveBeenCalledWith('Exported 1, already there 0, skipped 1, failed 0', false),
+  )
+  expect(bodies).toEqual([{ action: 'export', paths: expect.arrayContaining(['audio.mp3', 'video.mp4']) }])
+})

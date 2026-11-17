@@ -267,3 +267,12 @@ def test_existing_files_preview_and_export_through_a_rule(server):
     status, body = call(base, "/api/library/auto-rules", {"action": "apply_existing", "id": rule_id})
     assert body["exported"] == 1 and body["export_failed"] == 0
     assert list((media / "Wood Works" / "Season 2026").glob("*.mp4"))
+
+
+def test_the_site_name_stands_in_for_a_missing_channel_without_port_or_www(library, tmp_path):
+    assert mx.episode_info({"source": "www.example.com:8080"}, "x.mp4")["show"] == "example.com"
+    result = mx.export_video(library / "shed.mp4", {"title": "Shed", "source": "127.0.0.1:8961"}, "shed.mp4",
+                             tmp_path / "media")
+    assert "/127.0.0.1/" in result["target"].replace("\\", "/")
+    nfo = Path(result["target"]).with_suffix(".nfo")
+    assert ET.parse(nfo).getroot().find("trailer") is None  # Kodi would offer it as a playable trailer

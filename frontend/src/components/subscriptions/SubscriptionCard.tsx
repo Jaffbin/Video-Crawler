@@ -137,6 +137,14 @@ export function SubscriptionCard({ sub, onChanged, onToast }: Props) {
           />
           {t('Active')}
         </label>
+        <label className="flex items-center gap-2 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={!!sub.export_media}
+            onChange={(e) => run(() => updateSubscription(sub.id, { export_media: e.target.checked }))}
+          />
+          {t('Export to media server')}
+        </label>
       </div>
 
       {sub.last_error && (
