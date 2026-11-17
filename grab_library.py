@@ -81,6 +81,20 @@ def smart_collection_records(value, *, strict=False) -> dict:
     return result
 
 
+def clean_media_info(value: dict) -> dict:
+    """Bounded text facts from the site, used for media server export."""
+    result = {}
+    for key, limit in (("id", 64), ("channel", 200), ("channel_id", 128), ("upload_date", 8),
+                       ("description", 5000), ("extractor", 64)):
+        if isinstance(value.get(key), str) and value[key].strip():
+            result[key] = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", value[key])[:limit]
+    if result.get("upload_date") and not re.fullmatch(r"\d{8}", result["upload_date"]):
+        del result["upload_date"]
+    if type(value.get("duration")) in (int, float) and 0 < value["duration"] < 10**6:
+        result["duration"] = value["duration"]
+    return result
+
+
 class MediaLibrary:
     def __init__(self, root, suffixes: set[str], store=None):
         self.root = root
@@ -452,6 +466,8 @@ class MediaLibrary:
                                    "sponsorblock", "split_chapters", "section"}
                         and isinstance(value, (str, int, bool))
                     }
+                if isinstance(info.get("media_info"), dict) and info["media_info"]:
+                    data["files"][relative]["media_info"] = clean_media_info(info["media_info"])
                 if isinstance(info.get("repair_options"), dict):
                     data["files"][path.relative_to(self.root()).as_posix()]["repair_options"] = {
                         key: info["repair_options"][key] for key in ("mode", "abr", "cover", "keep_cover", "embed_subs")

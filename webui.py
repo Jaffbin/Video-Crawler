@@ -330,6 +330,15 @@ def _library_file_is_complete(relative: str) -> bool:
         return False
 
 
+def media_info(info: dict) -> dict:
+    """Facts a media server shows (channel, upload date, description), kept with the Library record."""
+    result = {"id": info.get("id"), "channel": info.get("channel") or info.get("uploader"),
+              "channel_id": info.get("channel_id") or info.get("uploader_id"),
+              "upload_date": info.get("upload_date"), "description": info.get("description"),
+              "duration": info.get("duration"), "extractor": info.get("extractor_key")}
+    return {key: value for key, value in result.items() if value not in (None, "")}
+
+
 def track_chapter_files(job: Job) -> None:
     """Record split chapters with their source, so Library knows where they came from."""
     for path in list(job.seen_paths):
@@ -429,6 +438,7 @@ def run_job(job: Job) -> None:
                 "complete": complete,
                 "repair_options": repair_options(vars(args)),
                 "download_profile": download_profile(args),
+                "media_info": media_info(info),
             }
 
     def image_progress(data):
