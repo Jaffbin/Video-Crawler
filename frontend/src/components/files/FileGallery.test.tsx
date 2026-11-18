@@ -17,6 +17,9 @@ const files: FileItem[] = [
   { name: 'audio.mp3', path: 'audio.mp3', size: 100, mtime: 20 },
 ]
 afterEach(() => vi.unstubAllGlobals())
+// Tests that render one or more full pages (50-200 cards) take 1-2 s alone in jsdom and can pass the
+// 5 s default when the suite runs four workers at once. A longer limit still catches a hang.
+const FULL_PAGE_TIMEOUT = 20_000
 
 it('refreshes recent membership each minute and immediately includes new saves between ticks', () => {
   vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
@@ -112,32 +115,38 @@ it('keeps hidden selections reviewable and clearable when a filter has no result
   expect(screen.queryByRole('button', { name: 'View selected' })).not.toBeInTheDocument()
 })
 
-it('restores search and pagination per library and supports resetting browsing', async () => {
-  const all = Array.from({ length: 51 }, (_, i) => ({
-    ...files[0],
-    name: `video-${i}.mp4`,
-    path: `video-${i}.mp4`,
-    mtime: i,
-  }))
-  const props = { files: all, windowMode: false, onRefresh: vi.fn(), onToast: vi.fn() }
-  const user = userEvent.setup()
-  let view = render(<FileGallery {...props} root="A" />)
-  await user.type(screen.getByRole('searchbox'), 'video')
-  await user.selectOptions(screen.getByRole('combobox', { name: 'Files per page' }), '25')
-  await user.click(screen.getByRole('button', { name: 'Next' }))
-  expect(screen.getByText('2 / 3')).toBeInTheDocument()
-  view.unmount()
-  view = render(<FileGallery {...props} root="B" />)
-  expect(screen.getByRole('searchbox')).toHaveValue('')
-  view.unmount()
-  render(<FileGallery {...props} root="A" />)
-  expect(screen.getByRole('searchbox')).toHaveValue('video')
-  expect(screen.getByRole('combobox', { name: 'Files per page' })).toHaveValue('25')
-  expect(screen.getByText('2 / 3')).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Reset browsing' }))
-  expect(screen.getByRole('searchbox')).toHaveValue('')
-  expect(screen.getByRole('combobox', { name: 'Files per page' })).toHaveValue('50')
-})
+it(
+  'restores search and pagination per library and supports resetting browsing',
+  async () => {
+    const all = Array.from({ length: 51 }, (_, i) => ({
+      ...files[0],
+      name: `video-${i}.mp4`,
+      path: `video-${i}.mp4`,
+      mtime: i,
+    }))
+    const props = { files: all, windowMode: false, onRefresh: vi.fn(), onToast: vi.fn() }
+    const user = userEvent.setup()
+    let view = render(<FileGallery {...props} root="A" />)
+    // One paste instead of typing per key: each keystroke re-renders a full page of cards in jsdom.
+    await user.click(screen.getByRole('searchbox'))
+    await user.paste('video')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Files per page' }), '25')
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    view.unmount()
+    view = render(<FileGallery {...props} root="B" />)
+    expect(screen.getByRole('searchbox')).toHaveValue('')
+    view.unmount()
+    render(<FileGallery {...props} root="A" />)
+    expect(screen.getByRole('searchbox')).toHaveValue('video')
+    expect(screen.getByRole('combobox', { name: 'Files per page' })).toHaveValue('25')
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Reset browsing' }))
+    expect(screen.getByRole('searchbox')).toHaveValue('')
+    expect(screen.getByRole('combobox', { name: 'Files per page' })).toHaveValue('50')
+  },
+  FULL_PAGE_TIMEOUT,
+)
 
 it('only adds the current page to selection and clears selection through one action', async () => {
   const user = userEvent.setup()
@@ -524,40 +533,44 @@ it('confirms batch moves and retains failed selections for retry', async () => {
   )
 })
 
-it('splits large selections into bounded batches and preserves unfinished work after a request fails', async () => {
-  const many = Array.from({ length: 205 }, (_, i) => ({
-    name: `video-${i}.mp4`,
-    path: `video-${i}.mp4`,
-    size: 1,
-    mtime: 1000 - i,
-  }))
-  let calls = 0
-  const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-    calls++
-    const items = JSON.parse(String(init?.body)).items as string[]
-    return new Response(
-      JSON.stringify(calls === 1 ? { processed: items, failed: [] } : { error: 'File locked' }),
-      { status: calls === 1 ? 200 : 409 },
-    )
-  })
-  vi.stubGlobal('fetch', fetch)
-  render(<FileGallery files={many} windowMode={false} onRefresh={() => {}} onToast={() => {}} />)
-  const selection = within(screen.getByRole('group', { name: 'Library selection' }))
-  const pagination = within(screen.getByRole('group', { name: 'Library pagination' }))
-  fireEvent.change(screen.getByLabelText('Files per page'), { target: { value: '100' } })
-  fireEvent.click(selection.getByRole('button', { name: 'Select this page' }))
-  fireEvent.click(pagination.getByRole('button', { name: 'Next' }))
-  fireEvent.click(selection.getByRole('button', { name: 'Select this page' }))
-  fireEvent.click(pagination.getByRole('button', { name: 'Next' }))
-  fireEvent.click(selection.getByRole('button', { name: 'Select this page' }))
-  fireEvent.click(selection.getByRole('button', { name: 'Move selected to recovery' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
-  expect(await screen.findByRole('alert')).toHaveTextContent('Some files could not be changed')
-  expect(fetch).toHaveBeenCalledTimes(2)
-  expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).items).toHaveLength(200)
-  expect(JSON.parse(String(fetch.mock.calls[1][1]?.body)).items).toHaveLength(5)
-  expect(screen.getByRole('checkbox', { name: 'Select video-200.mp4' })).toBeChecked()
-})
+it(
+  'splits large selections into bounded batches and preserves unfinished work after a request fails',
+  async () => {
+    const many = Array.from({ length: 205 }, (_, i) => ({
+      name: `video-${i}.mp4`,
+      path: `video-${i}.mp4`,
+      size: 1,
+      mtime: 1000 - i,
+    }))
+    let calls = 0
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls++
+      const items = JSON.parse(String(init?.body)).items as string[]
+      return new Response(
+        JSON.stringify(calls === 1 ? { processed: items, failed: [] } : { error: 'File locked' }),
+        { status: calls === 1 ? 200 : 409 },
+      )
+    })
+    vi.stubGlobal('fetch', fetch)
+    render(<FileGallery files={many} windowMode={false} onRefresh={() => {}} onToast={() => {}} />)
+    const selection = within(screen.getByRole('group', { name: 'Library selection' }))
+    const pagination = within(screen.getByRole('group', { name: 'Library pagination' }))
+    fireEvent.change(screen.getByLabelText('Files per page'), { target: { value: '100' } })
+    fireEvent.click(selection.getByRole('button', { name: 'Select this page' }))
+    fireEvent.click(pagination.getByRole('button', { name: 'Next' }))
+    fireEvent.click(selection.getByRole('button', { name: 'Select this page' }))
+    fireEvent.click(pagination.getByRole('button', { name: 'Next' }))
+    fireEvent.click(selection.getByRole('button', { name: 'Select this page' }))
+    fireEvent.click(selection.getByRole('button', { name: 'Move selected to recovery' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Some files could not be changed')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).items).toHaveLength(200)
+    expect(JSON.parse(String(fetch.mock.calls[1][1]?.body)).items).toHaveLength(5)
+    expect(screen.getByRole('checkbox', { name: 'Select video-200.mp4' })).toBeChecked()
+  },
+  FULL_PAGE_TIMEOUT,
+)
 
 it('confirms bulk permanent deletion and shows space including companions', async () => {
   const fetch = vi.fn(
@@ -798,29 +811,35 @@ it('restores a recovery item and refreshes the files', async () => {
   expect(screen.getByText('No recovery files.')).toBeInTheDocument()
 })
 
-it('paginates the complete filtered list and resets when changing page size or query', async () => {
-  const many = Array.from({ length: 61 }, (_, i) => ({
-    name: `video-${i}.mp4`,
-    path: `video-${i}.mp4`,
-    size: 10,
-    mtime: 100 - i,
-  }))
-  const user = userEvent.setup()
-  render(<FileGallery files={many} windowMode={false} onRefresh={() => {}} onToast={() => {}} />)
-  expect(screen.getAllByRole('listitem')).toHaveLength(50)
-  expect(screen.getByText('Showing 1–50 of 61')).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Next' }))
-  expect(screen.getAllByRole('listitem')).toHaveLength(11)
-  expect(screen.getByText('Showing 51–61 of 61')).toBeInTheDocument()
-  await user.selectOptions(screen.getByLabelText('Files per page'), '25')
-  expect(screen.getAllByRole('listitem')).toHaveLength(25)
-  expect(screen.getByText('Showing 1–25 of 61')).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Next' }))
-  await user.type(screen.getByRole('searchbox'), 'video-60')
-  expect(screen.getAllByRole('listitem')).toHaveLength(1)
-  expect(screen.getByText('Showing 1–1 of 1')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
-})
+it(
+  'paginates the complete filtered list and resets when changing page size or query',
+  async () => {
+    const many = Array.from({ length: 61 }, (_, i) => ({
+      name: `video-${i}.mp4`,
+      path: `video-${i}.mp4`,
+      size: 10,
+      mtime: 100 - i,
+    }))
+    const user = userEvent.setup()
+    render(<FileGallery files={many} windowMode={false} onRefresh={() => {}} onToast={() => {}} />)
+    expect(screen.getAllByRole('listitem')).toHaveLength(50)
+    expect(screen.getByText('Showing 1–50 of 61')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getAllByRole('listitem')).toHaveLength(11)
+    expect(screen.getByText('Showing 51–61 of 61')).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Files per page'), '25')
+    expect(screen.getAllByRole('listitem')).toHaveLength(25)
+    expect(screen.getByText('Showing 1–25 of 61')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    // One paste instead of typing per key: each keystroke re-renders a full page of cards in jsdom.
+    await user.click(screen.getByRole('searchbox'))
+    await user.paste('video-60')
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getByText('Showing 1–1 of 1')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+  },
+  FULL_PAGE_TIMEOUT,
+)
 
 it('shows why a scan is incomplete instead of implying that all files are searchable', () => {
   render(
