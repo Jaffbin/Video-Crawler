@@ -15,6 +15,6 @@ to explain choices that already exist. New decisions get a new numbered file.
 | [0007](0007-commit-the-built-frontend.md) | Commit the built frontend and verify it in CI | Accepted |
 | [0008](0008-mcp-server-as-api-client.md) | Build the MCP server as an optional, loopback-only client of the automation API | Accepted |
 | [0009](0009-remote-access-listener.md) | Remote access through a separate listener with paired devices | Accepted |
-| [0010](0010-canary-yt-dlp-updates.md) | Try a new yt-dlp on a few sites before switching to it | Proposed |
+| [0010](0010-canary-yt-dlp-updates.md) | Try a new yt-dlp on a few sites before switching to it | Accepted |
 
 Each record follows: Context → Decision → Consequences (good and bad) → Alternatives considered.

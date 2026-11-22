@@ -859,8 +859,19 @@ an Android share app). It fills the box; you still tap **Send**.
 ## Updating yt-dlp
 
 Sites change often, and a newer yt-dlp usually fixes them. **Settings and help → Updates**
-shows the running, installed and latest versions and updates with one click; restart the service to
-use the new version. Updates wait until no task is queued or downloading.
+shows the running, installed and latest versions; restart the service to use a new version. Updates
+wait until no task is queued or downloading.
+
+**Test and update yt-dlp** first tries the new release without installing it. It downloads the new
+version into a separate folder and asks both the current and the new version for the details of a
+few public, Creative Commons videos on YouTube, Internet Archive and Wikimedia Commons. Nothing is
+downloaded and no cookies are used. The new version is installed only if every site that works now
+still works with it. If a site breaks, your current version is kept, the window shows which site and
+why, and that release is not suggested again until a newer one appears; **Install anyway** is still
+available. A site that fails with both versions (a dead link, the network, a sign-in wall) does not
+count against the update. Turn on **Also test on up to three sites you downloaded from recently** to
+also try one recent link from each of those sites. **Update without testing** skips the check, for
+example when offline.
 
 A new release can occasionally break a site that worked before. After an update, the same window
 offers **Go back to <version>**, which reinstalls exactly the version the update replaced; restart

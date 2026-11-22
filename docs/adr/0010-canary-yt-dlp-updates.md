@@ -1,6 +1,7 @@
 # 0010. Try a new yt-dlp on a few sites before switching to it
 
-Status: Proposed (2026-11-23). Not implemented; open questions at the end.
+Status: Accepted (2026-11-23), implemented in `grab_canary.py`. The open questions were decided as
+recommended; see "Decisions" at the end.
 
 ## Context
 
@@ -31,7 +32,9 @@ check PyPI ──► stage new version ──► probe old and new ──► ver
 1. **Stage.** `pip install "yt-dlp[...]==<new>" --target <settings>/managed/ytdlp-staging/<new>`.
    Nothing the app uses is touched; a failed or cancelled stage is deleted.
 2. **Probe.** For each probe link, run the *current* and the *staged* yt-dlp in child processes
-   (`python -I` with an explicit `sys.path`, staging folder first for the new one) asking for
+   (started from an empty folder without `PYTHONPATH`, with the staging folder put first on
+   `sys.path` for the new one; `python -I` is not used because it would hide a yt-dlp installed in the
+   user's site-packages) asking for
    metadata only: no download, no playlist expansion, no cookies, a 45-second limit per link, at
    most two links in parallel. A probe succeeds when yt-dlp exits normally and returns at least one
    playable format.
@@ -103,7 +106,7 @@ added by this decision. The existing rules still apply: no update while tasks ar
   hundreds of sites and fails for reasons unrelated to the user.
 - **A project server that tests releases once for everyone:** contradicts "no project server".
 
-## Open questions (need a decision before implementation)
+## Open questions (decided)
 
 1. **On a regression, the default:** keep the current version and ask (recommended), or install
    anyway and only warn?
@@ -112,7 +115,22 @@ added by this decision. The existing rules still apply: no update while tasks ar
 3. **Built-in sites besides YouTube:** which two or three matter most to users of this app
    (for example Bilibili, Vimeo, SoundCloud)?
 
-## Implementation outline (after approval)
+## Decisions
+
+1. On a regression the current version is kept and the user is asked; **Install anyway** stays one
+   click away.
+2. Probing recent sites is opt-in, off by default (**Also test on up to three sites you downloaded
+   from recently** in the Updates window).
+3. Built-in probes: YouTube, Internet Archive and Wikimedia Commons, all Blender Foundation's Big Buck
+   Bunny, because each site's metadata states a Creative Commons licence that yt-dlp reads
+   (`license`). Vimeo was dropped because yt-dlp now needs a signed-in session there; Bilibili and
+   SoundCloud have no link whose licence could be verified the same way. Recent-site probes cover
+   sites like Bilibili for users who opt in.
+
+Measured on the development machine: the three built-in links with both versions (six child
+processes, two at a time) took about 10 seconds.
+
+## Implementation outline
 
 - `grab_canary.py` (pure logic, testable without network): probe list, verdict table, staging paths.
 - `webui.py`: an update pipeline with phases (`staging`, `probing`, `installing`) reusing `_do_update`,

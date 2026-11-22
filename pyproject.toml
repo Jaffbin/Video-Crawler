@@ -24,7 +24,7 @@ ai = ["faster-whisper>=1.1,<2"]
 mcp = ["mcp>=2.3,<3"]
 
 [tool.setuptools]
-py-modules = ["grab", "grab_api", "grab_archive", "grab_auto_rules", "grab_backup", "grab_cleanup", "grab_config", "grab_cookies", "grab_download", "grab_errors", "grab_hooks", "grab_images", "grab_library", "grab_mcp", "grab_mediaexport", "grab_organizer", "grab_plugins", "grab_push", "grab_remote", "grab_repair", "grab_schedule", "grab_transcribe", "grab_desktop", "grab_notifications", "grab_models", "grab_sites", "grab_state", "grab_storage", "grab_subscriptions", "webui", "webui_legacy_html", "webui_routes_api", "webui_routes_jobs", "webui_remote_page", "webui_routes_library", "webui_routes_remote", "webui_routes_subscriptions", "webui_routes_system", "webui_routes_transcripts"]
+py-modules = ["grab", "grab_api", "grab_archive", "grab_auto_rules", "grab_backup", "grab_canary", "grab_cleanup", "grab_config", "grab_cookies", "grab_download", "grab_errors", "grab_hooks", "grab_images", "grab_library", "grab_mcp", "grab_mediaexport", "grab_organizer", "grab_plugins", "grab_push", "grab_remote", "grab_repair", "grab_schedule", "grab_transcribe", "grab_desktop", "grab_notifications", "grab_models", "grab_sites", "grab_state", "grab_storage", "grab_subscriptions", "webui", "webui_legacy_html", "webui_routes_api", "webui_routes_jobs", "webui_remote_page", "webui_routes_library", "webui_routes_remote", "webui_routes_subscriptions", "webui_routes_system", "webui_routes_transcripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

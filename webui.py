@@ -73,6 +73,7 @@ import webui_routes_transcripts  # noqa: E402
 import webui_routes_remote  # noqa: E402
 import grab_remote  # noqa: E402
 import grab_cleanup  # noqa: E402
+import grab_canary  # noqa: E402
 import grab_transcribe  # noqa: E402
 import grab_api  # noqa: E402
 from grab_subscriptions import (  # noqa: E402
@@ -126,7 +127,8 @@ FILES_CACHE: dict = {"rev": None, "ts": 0.0, "data": []}
 FILE_SCAN_MAX_ENTRIES = 20000
 FILE_SCAN_MAX_DEPTH = 3
 _FILES_SCAN_LOCK = threading.Lock()
-UPDATE: dict = {"status": "idle", "lines": [], "before": "", "after": "", "error": "", "extras": ""}
+UPDATE: dict = {"status": "idle", "lines": [], "before": "", "after": "", "error": "", "extras": "",
+                "phase": "", "target": "", "probes": [], "verdict": ""}
 UPDATE_LOCK = threading.Lock()
 PYPI_CACHE: dict = {"ts": 0.0, "latest": None}
 # Settings that must not live in the (possibly synced or shared) download folder, e.g. cookies.txt
@@ -1026,26 +1028,51 @@ def _ytdlp_history_store() -> JsonStore:
     return JsonStore(lambda: CONFIG_DIR / "ytdlp.json", SETTINGS_LOCK)
 
 
+def _ytdlp_history() -> dict:
+    data = _ytdlp_history_store().load({})
+    return data if isinstance(data, dict) else {}
+
+
+def _saved_version(key: str) -> str:
+    value = _ytdlp_history().get(key)
+    return value if isinstance(value, str) and YTDLP_VERSION_RE.fullmatch(value) else ""
+
+
+def _change_ytdlp_history(**changes) -> None:
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        _ytdlp_history_store().save({**_ytdlp_history(), **changes})
+    except OSError as error:
+        print(f"Could not save yt-dlp update history: {error}")
+
+
 def previous_ytdlp() -> str:
     """The version an update replaced, if going back to it is still possible; otherwise ""."""
-    data = _ytdlp_history_store().load({})
-    value = data.get("previous") if isinstance(data, dict) else None
-    if not isinstance(value, str) or not YTDLP_VERSION_RE.fullmatch(value) or value == installed_version():
-        return ""
-    return value
+    value = _saved_version("previous")
+    return "" if value == installed_version() else value
+
+
+def skipped_ytdlp() -> str:
+    """A release that failed testing; the app stops suggesting it until a newer one appears."""
+    return _saved_version("skipped")
+
+
+def test_recent_sites() -> bool:
+    return _ytdlp_history().get("test_recent_sites") is True
+
+
+def set_test_recent_sites(enabled: bool) -> None:
+    _change_ytdlp_history(test_recent_sites=enabled is True)
 
 
 def _remember_previous_ytdlp(value: str) -> None:
-    try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        _ytdlp_history_store().save({"previous": value})
-    except OSError as error:
-        print(f"Could not remember the previous yt-dlp version: {error}")
+    _change_ytdlp_history(previous=value)
 
 
 def check_ytdlp(force: bool = False) -> dict:
     running, installed = yt_dlp.version.__version__, installed_version()
-    out = {"running": running, "installed": installed, "previous": previous_ytdlp(),
+    out = {"running": running, "installed": installed, "previous": previous_ytdlp(), "skipped": skipped_ytdlp(),
+           "test_recent_sites": test_recent_sites(),
            "needs_restart": version_key(installed) != version_key(running)}
     latest = PYPI_CACHE["latest"] if not force and time.time() - PYPI_CACHE["ts"] < 6 * 3600 else None
     if latest is None:
@@ -1057,19 +1084,76 @@ def check_ytdlp(force: bool = False) -> dict:
         except Exception as e:  # noqa: BLE001
             out.update(latest=None, newer=False, error=f"Cannot connect to PyPI: {e}")
             return out
-    out.update(latest=latest, newer=version_key(latest) > version_key(installed))
+    out.update(latest=latest, newer=version_key(latest) > version_key(installed) and latest != out["skipped"])
     return out
 
 
-def start_update(extras: str = "default") -> tuple[bool, str]:
+def start_update(extras: str = "default", *, test: bool = False, version: str | None = None) -> tuple[bool, str]:
+    """Update yt-dlp. With test=True a newer release is first tried on a few sites (ADR 0010);
+    version installs exactly that release, as after "Install anyway"."""
+    if version is not None and not YTDLP_VERSION_RE.fullmatch(str(version)):
+        return False, "Choose a valid yt-dlp version."
     with UPDATE_LOCK:
         if UPDATE["status"] == "running":
             return False, "Already updating"
         if active_jobs():
             return False, "There are tasks queued or downloading, wait for them to finish (or cancel) before updating."
-        UPDATE.update(status="running", lines=[], before=installed_version(), after="", error="", extras=extras)
-    threading.Thread(target=_do_update, args=(extras,), daemon=True).start()
+        UPDATE.update(status="running", lines=[], before=installed_version(), after="", error="", extras=extras,
+                      phase="", target=version or "", probes=[], verdict="")
+    if test and version is None:
+        threading.Thread(target=_do_tested_update, args=(extras,), daemon=True).start()
+    else:
+        threading.Thread(target=_do_update, args=(extras,), kwargs={"version": version} if version else {},
+                         daemon=True).start()
     return True, ""
+
+
+def _do_tested_update(extras: str = "default") -> None:
+    """Stage the newer release, compare it with the current one on the probe links, then install it
+    only if no link regressed. Anything else leaves the current version in place."""
+    info = check_ytdlp()
+    target = str(info.get("latest") or "")
+    if not info.get("newer") or not YTDLP_VERSION_RE.fullmatch(target):
+        _do_update(extras)  # nothing newer to test: this is a component install
+        return
+    staging = managed_component_root() / "ytdlp-staging" / target
+    grab_canary.remove_staging(staging)
+    try:
+        with UPDATE_LOCK:
+            UPDATE.update(phase="staging", target=target)
+        cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location",
+               "--target", str(staging), _ytdlp_package(extras, target)]
+        try:
+            rc = _run_pip(cmd)
+        except OSError as error:
+            rc, detail = 1, str(error)
+        else:
+            detail = ""
+        if rc != 0:
+            with UPDATE_LOCK:
+                UPDATE.update(status="error", phase="", error=f"Could not download yt-dlp {target} for testing. {detail}".strip())
+            return
+        probes = list(grab_canary.BUILT_IN_PROBES)
+        if test_recent_sites():
+            probes += grab_canary.recent_probes(JOB_MANAGER.snapshot(newest_first=True))
+        with UPDATE_LOCK:
+            UPDATE.update(phase="probing", probes=[{"site": item["site"], "verdict": "testing"} for item in probes])
+        results = grab_canary.compare(probes, staging, grab_canary.probe_options(grab.js_runtime_opts()))
+        outcome = grab_canary.overall(results)
+        with UPDATE_LOCK:
+            UPDATE.update(probes=[{key: item[key] for key in ("site", "current", "new", "verdict", "error")}
+                                  for item in results], verdict=outcome)
+        if outcome == "pass":
+            with UPDATE_LOCK:
+                UPDATE.update(phase="installing")
+            _do_update(extras, version=target)
+            return
+        if outcome == "regression":
+            _change_ytdlp_history(skipped=target)
+        with UPDATE_LOCK:
+            UPDATE.update(status="tested", phase="")
+    finally:
+        grab_canary.remove_staging(staging)
 
 
 def start_rollback() -> tuple[bool, str]:
@@ -1083,7 +1167,8 @@ def start_rollback() -> tuple[bool, str]:
         if active_jobs():
             return False, "There are tasks queued or downloading, wait for them to finish (or cancel) before updating."
         UPDATE.update(status="running", lines=[], before=installed_version(), after="", error="", extras="default")
-    threading.Thread(target=_do_update, args=("default",), kwargs={"version": target}, daemon=True).start()
+    threading.Thread(target=_do_update, args=("default",), kwargs={"version": target, "rollback": True},
+                     daemon=True).start()
     return True, ""
 
 
@@ -1189,7 +1274,7 @@ def _do_setup():
         UPDATE.update(status="error", error=str(error))
 
 
-def _do_update(extras: str = "default", *, preparing: bool = False, version: str | None = None) -> None:
+def _ytdlp_package(extras: str, version: str | None = None) -> str:
     # curl-cffi enables yt-dlp's browser impersonation for Iwara and anti-bot protected sites.
     selected = {item for item in extras.split(",") if item in {"default", "deno"}}
     selected.update({"curl-cffi", "default"})
@@ -1198,6 +1283,28 @@ def _do_update(extras: str = "default", *, preparing: bool = False, version: str
         if not YTDLP_VERSION_RE.fullmatch(version):
             raise ValueError("Invalid yt-dlp version")
         package += f"=={version}"
+    return package
+
+
+def _run_pip(cmd: list[str]) -> int:
+    """Run pip without a console window, streaming its output into the Updates log."""
+    kw: dict = {}
+    if sys.platform.startswith("win"):
+        kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace",
+                            env=dict(os.environ, PYTHONIOENCODING="utf-8"), **kw)
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        with UPDATE_LOCK:
+            UPDATE["lines"].append(line.rstrip()[:300])
+            del UPDATE["lines"][:-200]
+    return proc.wait()
+
+
+def _do_update(extras: str = "default", *, preparing: bool = False, version: str | None = None,
+               rollback: bool = False) -> None:
+    package = _ytdlp_package(extras, version)
     cmd = [sys.executable, "-m", "pip", "install", "-U", "--disable-pip-version-check", package]
     if os.environ.get("VIDEO_GRABBER_PORTABLE_ROOT"):
         package_dir = Path(sys.executable).resolve().parent / "Lib" / "site-packages"
@@ -1205,19 +1312,8 @@ def _do_update(extras: str = "default", *, preparing: bool = False, version: str
     elif preparing and sys.prefix == sys.base_prefix and not sys.flags.no_user_site:
         # Source installations should not need permission to modify a system-wide Python.
         cmd.insert(-1, "--user")
-    kw: dict = {}
-    if sys.platform.startswith("win"):
-        kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                encoding="utf-8", errors="replace",
-                                env=dict(os.environ, PYTHONIOENCODING="utf-8"), **kw)
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            with UPDATE_LOCK:
-                UPDATE["lines"].append(line.rstrip()[:300])
-                del UPDATE["lines"][:-200]
-        rc = proc.wait()
+        rc = _run_pip(cmd)
     except Exception as e:  # noqa: BLE001
         with UPDATE_LOCK:
             UPDATE.update(status="error", error=f"Cannot run pip: {e}")
@@ -1228,12 +1324,12 @@ def _do_update(extras: str = "default", *, preparing: bool = False, version: str
         if rc == 0:
             importlib.invalidate_caches()
             DOCTOR_CACHE["ts"] = 0.0
-            UPDATE.update(status="running" if preparing else "done", error="")
+            UPDATE.update(status="running" if preparing else "done", error="", phase="")
             before, after = UPDATE["before"], UPDATE["after"]
-            if version is not None:
+            if rollback:
                 _remember_previous_ytdlp("")  # went back; a later update offers the newer release again
             elif before and after and version_key(after) > version_key(before):
-                _remember_previous_ytdlp(before)
+                _change_ytdlp_history(previous=before, skipped="")
         else:
             if "externally-managed" in text:
                 hint = "The current Python environment is managed by the system; pip does not allow direct installation. Please use a virtual environment, or update manually in terminal."

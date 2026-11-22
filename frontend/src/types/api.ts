@@ -281,6 +281,9 @@ export interface YtdlpCheck {
   installed: string
   /** The version the last update replaced, when going back to it is possible. */
   previous?: string
+  /** A release that failed testing; it is not offered again until a newer one appears. */
+  skipped?: string
+  test_recent_sites?: boolean
   latest?: string | null
   newer?: boolean
   needs_restart: boolean
@@ -289,12 +292,25 @@ export interface YtdlpCheck {
 
 export interface UpdateStatus {
   setup_stage?: 'checking' | 'media' | 'sites' | 'verifying' | 'ready'
-  status: 'idle' | 'running' | 'done' | 'error'
+  /** "tested": a newer release was tried and not installed; see verdict and probes. */
+  status: 'idle' | 'running' | 'done' | 'error' | 'tested'
   lines: string[]
   before: string
   after: string
   error: string
   extras: string
+  phase?: '' | 'staging' | 'probing' | 'installing'
+  target?: string
+  verdict?: '' | 'pass' | 'regression' | 'untestable'
+  probes?: UpdateProbe[]
+}
+
+export interface UpdateProbe {
+  site: string
+  verdict: 'testing' | 'fine' | 'fixed' | 'inconclusive' | 'regression'
+  current?: boolean
+  new?: boolean
+  error?: string
 }
 
 export type ComponentExtras = 'default' | 'default,deno'

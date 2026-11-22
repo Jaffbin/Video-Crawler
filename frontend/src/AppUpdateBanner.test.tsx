@@ -80,7 +80,8 @@ it('starts the update straight from the banner and remembers a dismissal for tha
   render(<App />)
   await user.click(await screen.findByRole('button', { name: 'Update now' }))
   await waitFor(() => expect(started.length).toBe(1))
-  expect(JSON.parse(started[0])).toEqual({ extras: 'default' })
+  // The banner's Update now tries the new release on a few sites first (ADR 0010).
+  expect(JSON.parse(started[0])).toEqual({ extras: 'default', test: true })
 })
 
 it('keeps a dismissed version hidden', async () => {

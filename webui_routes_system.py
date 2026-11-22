@@ -204,9 +204,21 @@ def system_post(app, h, path: str, body: dict) -> bool:
         h._json({"ok": True} if ok else {"error": why}, 200 if ok else 409)
         return True
 
+    if path == "/api/ytdlp/settings":
+        if not isinstance(body.get("test_recent_sites"), bool):
+            h._json({"error": "test_recent_sites must be true or false"}, 400)
+            return True
+        app.set_test_recent_sites(body["test_recent_sites"])
+        h._json({"test_recent_sites": app.test_recent_sites()})
+        return True
+
     if path == "/api/ytdlp/update":
         extras = body.get("extras") if body.get("extras") in ("default", "default,deno") else "default"
-        ok, why = app.start_update(extras)
+        version = body.get("version")
+        if version is not None and not isinstance(version, str):
+            h._json({"error": "version must be text"}, 400)
+            return True
+        ok, why = app.start_update(extras, test=body.get("test") is True, version=version)
         h._json({"ok": True} if ok else {"error": why}, 200 if ok else 409)
         return True
 

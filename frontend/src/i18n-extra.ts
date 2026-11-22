@@ -2041,7 +2041,60 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Restart service': ['重启服务', '重新啟動服務', 'サービスを再起動'],
   'Starting…': ['正在启动…', '正在啟動…', '開始中…'],
   'Check again': ['再次检查', '再次檢查', '再確認'],
-  'Update yt-dlp': ['更新 yt-dlp', '更新 yt-dlp', 'yt-dlp を更新'],
+  'Test and update yt-dlp': ['测试并更新 yt-dlp', '測試並更新 yt-dlp', 'テストしてから yt-dlp を更新'],
+  'Update without testing': ['不测试直接更新', '不測試直接更新', 'テストせずに更新'],
+  Works: ['正常', '正常', '正常'],
+  'Works again with the new version': ['新版本修好了', '新版本修好了', '新しいバージョンで直りました'],
+  'Could not test (link, network or sign-in)': [
+    '无法测试（链接、网络或需要登录）',
+    '無法測試（連結、網路或需要登入）',
+    'テストできません（リンク、ネットワーク、またはログイン）',
+  ],
+  'Broken by the new version': ['被新版本弄坏了', '被新版本弄壞了', '新しいバージョンで動かなくなりました'],
+  'Sites tested': ['已测试的网站', '已測試的網站', 'テストしたサイト'],
+  'Downloading yt-dlp {version} to test it…': [
+    '正在下载 yt-dlp {version} 用于测试…',
+    '正在下載 yt-dlp {version} 用於測試…',
+    'テスト用に yt-dlp {version} をダウンロードしています…',
+  ],
+  'Testing yt-dlp {version} on {count} sites…': [
+    '正在 {count} 个网站上测试 yt-dlp {version}…',
+    '正在 {count} 個網站上測試 yt-dlp {version}…',
+    '{count} 件のサイトで yt-dlp {version} をテストしています…',
+  ],
+  'Tests passed. Installing yt-dlp {version}…': [
+    '测试通过，正在安装 yt-dlp {version}…',
+    '測試通過，正在安裝 yt-dlp {version}…',
+    'テストに合格しました。yt-dlp {version} をインストールしています…',
+  ],
+  'yt-dlp {version} broke a site that works now, so your current version was kept. It will not be suggested again until a newer release appears.':
+    [
+      'yt-dlp {version} 会让一个现在正常的网站出问题，所以保留了当前版本。在出现更新的版本之前，不会再提示这个版本。',
+      'yt-dlp {version} 會讓一個現在正常的網站出問題，所以保留了目前版本。在出現更新的版本之前，不會再提示這個版本。',
+      'yt-dlp {version} は現在動作しているサイトを壊すため、現在のバージョンを維持しました。より新しいリリースが出るまで、このバージョンは再提案しません。',
+    ],
+  'yt-dlp {version} could not be tested: no test site answered. Your current version was kept.': [
+    'yt-dlp {version} 无法测试：没有任何测试网站给出结果。已保留当前版本。',
+    'yt-dlp {version} 無法測試：沒有任何測試網站給出結果。已保留目前版本。',
+    'yt-dlp {version} をテストできませんでした：どのテストサイトからも結果が得られませんでした。現在のバージョンを維持しました。',
+  ],
+  'Keep current version': ['保留当前版本', '保留目前版本', '現在のバージョンを維持'],
+  'Install {version} anyway': [
+    '仍然安装 {version}',
+    '仍然安裝 {version}',
+    'それでも {version} をインストール',
+  ],
+  'yt-dlp {version} was not installed because it broke a site in testing.': [
+    'yt-dlp {version} 在测试中让一个网站出了问题，所以没有安装。',
+    'yt-dlp {version} 在測試中讓一個網站出了問題，所以沒有安裝。',
+    'yt-dlp {version} はテストでサイトを壊したため、インストールしませんでした。',
+  ],
+  'Also test on up to three sites you downloaded from recently. This opens one recent link per site again, without cookies.':
+    [
+      '同时在最近下载过的网站（最多 3 个）上测试。每个网站会重新打开一个最近的链接，不带 cookies。',
+      '同時在最近下載過的網站（最多 3 個）上測試。每個網站會重新開啟一個最近的連結，不帶 cookies。',
+      '最近ダウンロードしたサイト（最大3件）でもテストします。サイトごとに最近のリンクを1つ、Cookie なしで再度開きます。',
+    ],
   'Install YouTube components': [
     '安装 YouTube 组件',
     '安裝 YouTube 元件',

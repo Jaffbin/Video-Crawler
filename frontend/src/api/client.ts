@@ -324,8 +324,13 @@ export const prepareSetup = () => post<{ ok: boolean }>('/api/setup')
 export const retryWithBrowser = (id: string, browser: string) =>
   post<{ ids: string[]; duplicates: boolean }>(`/api/jobs/${id}/retry-browser`, { browser })
 export const checkYtdlp = (force = false) => api<YtdlpCheck>(`/api/ytdlp/check${force ? '?force=1' : ''}`)
-export const startYtdlpUpdate = (extras: ComponentExtras = 'default') =>
-  post<{ ok: boolean }>('/api/ytdlp/update', { extras })
+/** test: try a newer release on a few sites first (ADR 0010). version: install exactly this release. */
+export const startYtdlpUpdate = (
+  extras: ComponentExtras = 'default',
+  options: { test?: boolean; version?: string } = {},
+) => post<{ ok: boolean }>('/api/ytdlp/update', { extras, ...options })
+export const setTestRecentSites = (enabled: boolean) =>
+  post<{ test_recent_sites: boolean }>('/api/ytdlp/settings', { test_recent_sites: enabled })
 export const rollbackYtdlp = () => post<{ ok: boolean }>('/api/ytdlp/rollback')
 export const getUpdateStatus = () => api<UpdateStatus>('/api/ytdlp/update-status')
 export const restart = () => post<{ ok: boolean }>('/api/restart')
