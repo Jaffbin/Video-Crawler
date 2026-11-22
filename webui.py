@@ -71,6 +71,7 @@ import webui_routes_api  # noqa: E402
 import webui_routes_transcripts  # noqa: E402
 import webui_routes_remote  # noqa: E402
 import grab_remote  # noqa: E402
+import grab_cleanup  # noqa: E402
 import grab_transcribe  # noqa: E402
 import grab_api  # noqa: E402
 from grab_subscriptions import (  # noqa: E402
@@ -2386,6 +2387,9 @@ def main(argv=None) -> None:
     global SUB_INTERVAL_SECONDS
     ROOT = config.download_dir if config.download_dir_explicit else saved_download_root(config.download_dir)
     ROOT.mkdir(parents=True, exist_ok=True)
+    leftovers = grab_cleanup.cleanup(ROOT, CONFIG_DIR)
+    if leftovers["removed"]:
+        print(f"Removed {len(leftovers['removed'])} temporary file(s) left by an earlier forced shutdown.")
     load_history()
     load_subscriptions()
     SUB_INTERVAL_SECONDS = load_subscription_interval(config.subscription_interval_seconds)

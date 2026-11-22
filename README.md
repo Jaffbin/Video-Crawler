@@ -291,8 +291,10 @@ New installations open Library first; remembered pages and direct links still ta
 **Import local files** copies selected files into the current folder's `imports/` directory, leaving
 originals untouched. Imports support up to 100 files per batch and 8 GiB per file. Identical imported
 content with the same extension is skipped when its recorded file is still unchanged. Same-name
-conflicts never overwrite existing files. Canceled/failed transfers remain hidden and are cleaned up;
-a forced process termination may leave temporary files in the hidden `.library-imports/` folder.
+conflicts never overwrite existing files. Canceled/failed transfers remain hidden and are cleaned up.
+After a forced shutdown, the next start removes temporary files left by imports, image downloads,
+repairs and per-run cookie copies once they are an hour old; yt-dlp partial downloads are kept for
+Repair. Tests kill imports, Recovery moves and metadata saves part-way to check that nothing is lost.
 
 Choose **Grid view** or **List view**. Cards use separate covers when available, otherwise supported
 videos attempt a first-frame preview. Click the title/artwork for details, tags and a note; search
