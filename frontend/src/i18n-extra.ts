@@ -2328,6 +2328,12 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Automation API': ['自动化 API', '自動化 API', '自動化 API'],
   'Remote access': ['远程访问', '遠端存取', 'リモートアクセス'],
   'Library data': ['资料库数据', '資料庫資料', 'ライブラリデータ'],
+  'If downloads stopped working after the last update, go back to {version}.': [
+    '如果上次更新后下载出了问题，可以退回到 {version}。',
+    '如果上次更新後下載出了問題，可以退回到 {version}。',
+    '前回の更新後にダウンロードできなくなった場合は、{version} に戻せます。',
+  ],
+  'Go back to {version}': ['退回到 {version}', '退回到 {version}', '{version} に戻す'],
   'Check library data': ['检查资料库数据', '檢查資料庫資料', 'ライブラリデータを確認'],
   'No library data has been saved in this folder yet.': [
     '这个文件夹还没有保存过资料库数据。',

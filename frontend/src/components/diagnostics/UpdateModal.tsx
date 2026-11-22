@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { checkYtdlp, getUpdateStatus, startYtdlpUpdate } from '../../api/client'
+import { checkYtdlp, getUpdateStatus, rollbackYtdlp, startYtdlpUpdate } from '../../api/client'
 import type { ToastFn } from '../../hooks/useToasts'
 import type { ComponentExtras, YtdlpCheck } from '../../types/api'
 import { Button } from '../ui/Button'
@@ -52,11 +52,15 @@ export function UpdateModal({ open, onClose, onRestart, onToast, onChecked, auto
   }
 
   async function install(extras: ComponentExtras) {
+    await run(() => startYtdlpUpdate(extras))
+  }
+
+  async function run(start: () => Promise<unknown>) {
     setPhase('installing')
     setLog([])
     setError('')
     try {
-      await startYtdlpUpdate(extras)
+      await start()
     } catch (e) {
       setPhase('error')
       setError(e instanceof Error ? e.message : t('Could not start the update'))
@@ -114,6 +118,18 @@ export function UpdateModal({ open, onClose, onRestart, onToast, onChecked, auto
               <p className="mt-1 text-zinc-400">
                 {t('Latest on PyPI')}: {check.latest}
               </p>
+            )}
+            {check.previous && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <p className="min-w-0 flex-1 text-zinc-300">
+                  {t('If downloads stopped working after the last update, go back to {version}.', {
+                    version: check.previous,
+                  })}
+                </p>
+                <Button onClick={() => void run(rollbackYtdlp)}>
+                  {t('Go back to {version}', { version: check.previous })}
+                </Button>
+              </div>
             )}
           </div>
         )}

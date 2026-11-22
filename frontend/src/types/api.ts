@@ -279,6 +279,8 @@ export interface DoctorResult {
 export interface YtdlpCheck {
   running: string
   installed: string
+  /** The version the last update replaced, when going back to it is possible. */
+  previous?: string
   latest?: string | null
   newer?: boolean
   needs_restart: boolean

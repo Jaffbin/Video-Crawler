@@ -326,6 +326,7 @@ export const retryWithBrowser = (id: string, browser: string) =>
 export const checkYtdlp = (force = false) => api<YtdlpCheck>(`/api/ytdlp/check${force ? '?force=1' : ''}`)
 export const startYtdlpUpdate = (extras: ComponentExtras = 'default') =>
   post<{ ok: boolean }>('/api/ytdlp/update', { extras })
+export const rollbackYtdlp = () => post<{ ok: boolean }>('/api/ytdlp/rollback')
 export const getUpdateStatus = () => api<UpdateStatus>('/api/ytdlp/update-status')
 export const restart = () => post<{ ok: boolean }>('/api/restart')
 /** Asks the backend to show a native OS notification (window mode only; see StateResponse.desktop_notifications). */

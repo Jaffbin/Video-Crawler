@@ -20,8 +20,8 @@ organized in a Library you control. Windows app and Python tool, powered by yt-d
   playlists and channels. The queue survives restarts and retries only what failed.
 - **A Library, not a folder of files.** Search, favorites, collections, tags, duplicate checks, and
   every delete can be undone.
-- **Built to keep working.** Sites change often, so the app checks for a newer yt-dlp, tells you
-  what is missing and sets it up for you.
+- **Built to keep working.** Sites change often, so the app checks for a newer yt-dlp, can go back
+  to the previous one if a release breaks something, tells you what is missing and sets it up for you.
 
 Start with **New download**, optionally analyze the link, then follow progress in **Queue**.
 Completed files appear in **Library**. See the [user guide](docs/USER_GUIDE.md) for previews,

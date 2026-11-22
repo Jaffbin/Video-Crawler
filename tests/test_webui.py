@@ -839,6 +839,71 @@ def test_update_is_refused_while_jobs_are_active():
     assert not ok and "queued or downloading" in why
 
 
+def fake_versions(monkeypatch, *versions):
+    """installed_version() returns these in turn, then keeps the last one."""
+    seen = list(versions)
+    monkeypatch.setattr(webui, "installed_version", lambda: seen.pop(0) if len(seen) > 1 else seen[0])
+
+
+def test_an_update_remembers_the_version_it_replaced(monkeypatch):
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: FakeProc(cmd))
+    monkeypatch.setattr(webui, "PYPI_CACHE", {"ts": time.time(), "latest": "2026.11.10"})
+    fake_versions(monkeypatch, "2026.10.01", "2026.11.10")
+    webui.UPDATE["before"] = webui.installed_version()
+    webui._do_update("default")
+    assert webui.previous_ytdlp() == "2026.10.01"
+    assert webui.check_ytdlp()["previous"] == "2026.10.01"
+
+
+def test_an_update_that_changes_nothing_offers_no_rollback(monkeypatch):
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: FakeProc(cmd))
+    fake_versions(monkeypatch, "2026.11.10")
+    webui.UPDATE["before"] = webui.installed_version()
+    webui._do_update("default")
+    assert webui.previous_ytdlp() == ""
+
+
+def test_rollback_installs_exactly_the_previous_version_then_clears_it(monkeypatch):
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: FakeProc(cmd))
+    fake_versions(monkeypatch, "2026.11.10")
+    webui._remember_previous_ytdlp("2026.10.01")
+    started = []
+    monkeypatch.setattr(webui.threading, "Thread",
+                        lambda target, args=(), kwargs=None, daemon=None: type("T", (), {
+                            "start": lambda self: started.append(target(*args, **(kwargs or {})))})())
+    ok, why = webui.start_rollback()
+    assert ok, why
+    assert FakeProc.cmd[-1] == "yt-dlp[curl-cffi,default]==2026.10.01"
+    assert webui.UPDATE["status"] == "done" and webui.previous_ytdlp() == ""
+    assert webui.start_rollback() == (False, "There is no earlier yt-dlp version to go back to.")
+
+
+@pytest.mark.parametrize("saved", ["2026.10.01; rm -rf /", "../evil", "latest", 20261001, None])
+def test_rollback_refuses_a_tampered_or_missing_version(monkeypatch, saved):
+    fake_versions(monkeypatch, "2026.11.10")
+    webui.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    (webui.CONFIG_DIR / "ytdlp.json").write_text(json.dumps({"previous": saved}), encoding="utf-8")
+    assert webui.previous_ytdlp() == ""
+    assert webui.start_rollback()[0] is False
+    with pytest.raises(ValueError):
+        webui._do_update("default", version="2026.10.01 --index-url=http://evil")
+
+
+def test_rollback_is_refused_while_jobs_are_active(monkeypatch):
+    fake_versions(monkeypatch, "2026.11.10")
+    webui._remember_previous_ytdlp("2026.10.01")
+    job = webui.Job("https://example.com/v", {})
+    webui.JOBS[job.id] = job
+    ok, why = webui.start_rollback()
+    assert not ok and "queued or downloading" in why
+
+
+def test_rollback_route_needs_the_page_token(server):
+    assert call(server, "/api/ytdlp/rollback", {}, token=False)[0] == 401
+    status, body = call(server, "/api/ytdlp/rollback", {})
+    assert status == 409 and "no earlier" in body["error"]
+
+
 def test_background_loops_stop_without_waiting_for_their_normal_interval():
     stop = threading.Event()
     stop.set()

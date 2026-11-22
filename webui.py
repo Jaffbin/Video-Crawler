@@ -1018,9 +1018,34 @@ def version_key(v: str) -> tuple:
     return tuple(int(x) for x in re.findall(r"\d+", v or "")[:4])
 
 
+# yt-dlp release and nightly versions, e.g. 2026.11.03 or 2026.11.03.215033
+YTDLP_VERSION_RE = re.compile(r"\d{4}\.\d{1,2}\.\d{1,2}(\.\d{1,6})?")
+
+
+def _ytdlp_history_store() -> JsonStore:
+    return JsonStore(lambda: CONFIG_DIR / "ytdlp.json", SETTINGS_LOCK)
+
+
+def previous_ytdlp() -> str:
+    """The version an update replaced, if going back to it is still possible; otherwise ""."""
+    data = _ytdlp_history_store().load({})
+    value = data.get("previous") if isinstance(data, dict) else None
+    if not isinstance(value, str) or not YTDLP_VERSION_RE.fullmatch(value) or value == installed_version():
+        return ""
+    return value
+
+
+def _remember_previous_ytdlp(value: str) -> None:
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        _ytdlp_history_store().save({"previous": value})
+    except OSError as error:
+        print(f"Could not remember the previous yt-dlp version: {error}")
+
+
 def check_ytdlp(force: bool = False) -> dict:
     running, installed = yt_dlp.version.__version__, installed_version()
-    out = {"running": running, "installed": installed,
+    out = {"running": running, "installed": installed, "previous": previous_ytdlp(),
            "needs_restart": version_key(installed) != version_key(running)}
     latest = PYPI_CACHE["latest"] if not force and time.time() - PYPI_CACHE["ts"] < 6 * 3600 else None
     if latest is None:
@@ -1044,6 +1069,21 @@ def start_update(extras: str = "default") -> tuple[bool, str]:
             return False, "There are tasks queued or downloading, wait for them to finish (or cancel) before updating."
         UPDATE.update(status="running", lines=[], before=installed_version(), after="", error="", extras=extras)
     threading.Thread(target=_do_update, args=(extras,), daemon=True).start()
+    return True, ""
+
+
+def start_rollback() -> tuple[bool, str]:
+    """Reinstall the yt-dlp version the last update replaced, for when a new release breaks downloads."""
+    target = previous_ytdlp()
+    if not target:
+        return False, "There is no earlier yt-dlp version to go back to."
+    with UPDATE_LOCK:
+        if UPDATE["status"] == "running":
+            return False, "Already updating"
+        if active_jobs():
+            return False, "There are tasks queued or downloading, wait for them to finish (or cancel) before updating."
+        UPDATE.update(status="running", lines=[], before=installed_version(), after="", error="", extras="default")
+    threading.Thread(target=_do_update, args=("default",), kwargs={"version": target}, daemon=True).start()
     return True, ""
 
 
@@ -1149,11 +1189,15 @@ def _do_setup():
         UPDATE.update(status="error", error=str(error))
 
 
-def _do_update(extras: str = "default", *, preparing: bool = False) -> None:
+def _do_update(extras: str = "default", *, preparing: bool = False, version: str | None = None) -> None:
     # curl-cffi enables yt-dlp's browser impersonation for Iwara and anti-bot protected sites.
     selected = {item for item in extras.split(",") if item in {"default", "deno"}}
     selected.update({"curl-cffi", "default"})
     package = f"yt-dlp[{','.join(sorted(selected))}]"
+    if version is not None:
+        if not YTDLP_VERSION_RE.fullmatch(version):
+            raise ValueError("Invalid yt-dlp version")
+        package += f"=={version}"
     cmd = [sys.executable, "-m", "pip", "install", "-U", "--disable-pip-version-check", package]
     if os.environ.get("VIDEO_GRABBER_PORTABLE_ROOT"):
         package_dir = Path(sys.executable).resolve().parent / "Lib" / "site-packages"
@@ -1185,6 +1229,11 @@ def _do_update(extras: str = "default", *, preparing: bool = False) -> None:
             importlib.invalidate_caches()
             DOCTOR_CACHE["ts"] = 0.0
             UPDATE.update(status="running" if preparing else "done", error="")
+            before, after = UPDATE["before"], UPDATE["after"]
+            if version is not None:
+                _remember_previous_ytdlp("")  # went back; a later update offers the newer release again
+            elif before and after and version_key(after) > version_key(before):
+                _remember_previous_ytdlp(before)
         else:
             if "externally-managed" in text:
                 hint = "The current Python environment is managed by the system; pip does not allow direct installation. Please use a virtual environment, or update manually in terminal."

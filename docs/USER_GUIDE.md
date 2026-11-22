@@ -856,6 +856,17 @@ says so; choose another port or address and **Save**.
 A link can also be passed to the phone page as `/?url=<link>` (for example from an iOS Shortcut or
 an Android share app). It fills the box; you still tap **Send**.
 
+## Updating yt-dlp
+
+Sites change often, and a newer yt-dlp usually fixes them. **Settings and help → Updates**
+shows the running, installed and latest versions and updates with one click; restart the service to
+use the new version. Updates wait until no task is queued or downloading.
+
+A new release can occasionally break a site that worked before. After an update, the same window
+offers **Go back to <version>**, which reinstalls exactly the version the update replaced; restart
+the service to use it. The app remembers that version across restarts. Going back clears it, and the
+window will offer the newer release again.
+
 ## yt-dlp plugins
 
 yt-dlp plugins, such as a PO Token provider for YouTube or an extractor for an extra site, work in

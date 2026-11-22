@@ -199,6 +199,11 @@ def system_post(app, h, path: str, body: dict) -> bool:
         h._json({"ok": True} if ok else {"error": error}, 200 if ok else 409)
         return True
 
+    if path == "/api/ytdlp/rollback":
+        ok, why = app.start_rollback()
+        h._json({"ok": True} if ok else {"error": why}, 200 if ok else 409)
+        return True
+
     if path == "/api/ytdlp/update":
         extras = body.get("extras") if body.get("extras") in ("default", "default,deno") else "default"
         ok, why = app.start_update(extras)
