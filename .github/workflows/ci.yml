@@ -9,7 +9,13 @@ permissions:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    # The app is mainly used on Windows, where file locking, path rules and file identity differ.
+    name: backend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
