@@ -2327,6 +2327,39 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Download schedule': ['下载时间表', '下載時間表', 'ダウンロードスケジュール'],
   'Automation API': ['自动化 API', '自動化 API', '自動化 API'],
   'Remote access': ['远程访问', '遠端存取', 'リモートアクセス'],
+  'Library data': ['资料库数据', '資料庫資料', 'ライブラリデータ'],
+  'Check library data': ['检查资料库数据', '檢查資料庫資料', 'ライブラリデータを確認'],
+  'No library data has been saved in this folder yet.': [
+    '这个文件夹还没有保存过资料库数据。',
+    '這個資料夾還沒有儲存過資料庫資料。',
+    'このフォルダーにはまだライブラリデータが保存されていません。',
+  ],
+  'The database is fine, but its saved copy (.grab-library.json) is damaged, missing or out of date. Rewrite the copy from the database.':
+    [
+      '数据库正常，但它的保存副本（.grab-library.json）已损坏、缺失或过期。请用数据库重写这个副本。',
+      '資料庫正常，但它的儲存副本（.grab-library.json）已損壞、遺失或過期。請用資料庫重寫這個副本。',
+      'データベースは正常ですが、保存コピー（.grab-library.json）が破損・欠落・古くなっています。データベースからコピーを書き直してください。',
+    ],
+  'The library database is damaged. It can be rebuilt from the saved copy ({count} items). The damaged file is kept next to it, and the most recent change may be missing.':
+    [
+      '资料库数据库已损坏，可以用保存副本（{count} 项）重建。损坏的文件会保留在旁边；最近一次改动可能缺失。',
+      '資料庫資料庫已損壞，可以用儲存副本（{count} 項）重建。損壞的檔案會保留在旁邊；最近一次變更可能遺失。',
+      'ライブラリのデータベースが破損しています。保存コピー（{count} 件）から再構築できます。破損したファイルはそのまま残し、直近の変更が欠けている可能性があります。',
+    ],
+  'The database and its saved copy are both damaged. Nothing was changed. Restore a backup in Backup and restore, or keep the files and ask for help.':
+    [
+      '数据库和保存副本都已损坏，未做任何更改。请在“备份与恢复”中恢复备份，或保留这些文件并寻求帮助。',
+      '資料庫和儲存副本都已損壞，未做任何變更。請在「備份與還原」中還原備份，或保留這些檔案並尋求協助。',
+      'データベースと保存コピーの両方が破損しています。何も変更していません。「バックアップと復元」でバックアップを復元するか、ファイルを残したままサポートに相談してください。',
+    ],
+  'Library data is healthy: {count} items, and the database matches its saved copy.': [
+    '资料库数据正常：共 {count} 项，数据库与保存副本一致。',
+    '資料庫資料正常：共 {count} 項，資料庫與儲存副本一致。',
+    'ライブラリデータは正常です：{count} 件、データベースと保存コピーは一致しています。',
+  ],
+  'Rewrite the saved copy': ['重写保存副本', '重寫儲存副本', '保存コピーを書き直す'],
+  'Rebuild the database': ['重建数据库', '重建資料庫', 'データベースを再構築'],
+  'Rebuild now': ['立即重建', '立即重建', '今すぐ再構築'],
   'Lets phones you pair add downloads, follow the queue and play your Library. Paired phones cannot change settings, delete files or see your cookies. Use Tailscale to reach this computer securely from anywhere, or your home Wi-Fi.':
     [
       '让配对过的手机添加下载、查看队列并播放资料库。配对的手机不能更改设置、删除文件或查看 cookies。可以用 Tailscale 从任何地方安全地连接这台电脑，也可以用家里的 Wi-Fi。',

@@ -10,6 +10,10 @@ from pathlib import Path
 
 
 def library_get(app, h, path: str) -> bool:
+    if path == "/api/library/integrity":
+        with app.LIBRARY.lock:
+            h._json(app.LIBRARY.store.check())
+        return True
     if path == "/api/library/organizer":
         h._json(app.ORGANIZER.snapshot())
         return True
@@ -53,6 +57,20 @@ def media_export_post(app, h, body: dict) -> None:
 
 
 def library_post(app, h, path: str, body: dict) -> bool:
+    if path == "/api/library/integrity":
+        try:
+            with app.LIBRARY.lock:
+                report = app.LIBRARY.store.repair(body.get("action"))
+        except ValueError as error:
+            h._json({"error": str(error)}, 409)
+            return True
+        except OSError:
+            logging.getLogger(__name__).exception("Library data repair failed.")
+            h._json({"error": "Could not repair the library data. Check permissions and free space."}, 500)
+            return True
+        app.bump_rev()
+        h._json(report)
+        return True
     if path == "/api/media-export":
         media_export_post(app, h, body)
         return True

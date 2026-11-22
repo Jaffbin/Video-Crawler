@@ -82,6 +82,23 @@ Subscriptions are matched by link: one you already have keeps its current settin
 subscription starts like a new one and downloads only videos published after the restore, not the
 channel's back catalogue. Earlier app versions ignore subscriptions in a backup.
 
+### Checking and repairing library data
+
+Favorites, tags, notes, collections and Recovery records are saved in a database inside the
+library folder (`.grab-library.db`) and in a copy next to it (`.grab-library.json`). If the
+database cannot be read, for example after a disk error, the Library shows the copy instead, and
+Diagnostics warns that changes cannot be saved until it is repaired.
+
+Open **Settings and help → Diagnostics → Check library data** to compare the two. It offers the one
+repair that applies, and only when you click it:
+
+- **Rewrite the saved copy** when the database is fine but the copy is damaged, missing or behind.
+- **Rebuild the database** from the copy when the database is damaged. The damaged file is kept as
+  `.grab-library.db.damaged-<date>` and nothing is deleted. The copy can miss the very last change
+  made before a crash.
+
+If both are damaged, nothing is changed; restore a backup instead.
+
 Restoring does not change the save folder, move media, alter active jobs or create subscriptions.
 If relevant data changes after the preview, preview again before applying it. Metadata/settings
 files are staged with recovery copies so ordinary write failures roll back. Browser settings are

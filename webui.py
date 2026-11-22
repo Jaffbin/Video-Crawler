@@ -1701,6 +1701,11 @@ def collect_doctor(net: bool = False, force: bool = False) -> dict:
     else:
         checks.append(grab.check_item("pywebview", "Desktop window (pywebview)", "info",
                                       "Not installed. Optional: only needed for --ui window.", fix="pip install pywebview"))
+    if LIBRARY.store.state.get("problem") == "database_unreadable":
+        checks.append(grab.check_item(
+            "library_data", "Library data", "warn",
+            "The library database cannot be read, so the last saved copy is shown and changes cannot be saved.",
+            fix="Use Check library data below to rebuild the database. The damaged file is kept."))
     subscriptions = SUBSCRIPTION_MANAGER.snapshot()
     active = sum(1 for subscription in subscriptions if subscription.enabled)
     total = len(subscriptions)

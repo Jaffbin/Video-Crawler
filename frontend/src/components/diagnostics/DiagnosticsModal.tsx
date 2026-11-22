@@ -5,6 +5,7 @@ import type { ComponentExtras, DoctorResult } from '../../types/api'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { DoctorList } from './DoctorList'
+import { LibraryDataCheck } from './LibraryDataCheck'
 import { useI18n } from '../../i18n'
 
 interface Props {
@@ -99,6 +100,8 @@ export function DiagnosticsModal({
             busyAction={installBusy ? 'installing' : null}
           />
         )}
+
+        <LibraryDataCheck onRepaired={() => void onRefresh()} />
 
         <p className="text-xs text-zinc-500">
           {t(

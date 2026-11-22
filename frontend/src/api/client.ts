@@ -299,6 +299,17 @@ export const openHooksConfig = () => post<HooksStatus>('/api/hooks/open-config')
 export const testNotifications = () => post<NotificationTestResponse>('/api/hooks/test-notifications')
 export const uploadCookies = (text: string) => post<CookieStatus>('/api/cookies', { text })
 export const deleteCookies = () => post<CookieStatus>('/api/cookies/delete')
+export interface LibraryIntegrity {
+  database: 'ok' | 'missing' | 'damaged'
+  mirror: 'ok' | 'missing' | 'damaged'
+  in_sync: boolean | null
+  records: number
+  action: '' | 'rewrite_mirror' | 'rebuild_database'
+  detail: string
+}
+export const checkLibraryData = () => api<LibraryIntegrity>('/api/library/integrity')
+export const repairLibraryData = (action: 'rewrite_mirror' | 'rebuild_database') =>
+  post<LibraryIntegrity>('/api/library/integrity', { action })
 export const getDoctor = (net = false, force = true) =>
   api<DoctorResult>(`/api/doctor?${net ? 'net=1&' : ''}${force ? 'force=1' : ''}`)
 export const getSetupStatus = () =>
