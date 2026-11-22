@@ -1002,9 +1002,15 @@ def run_diagnostics(output_dir: str | Path | None = None, net: bool = False) -> 
     return checks
 
 
+SECRET_QUERY = re.compile(
+    r"([?&;](?:[\w.-]*(?:token|key|sig|signature|auth|session|secret|password|passwd|pwd|credential|expires?)"
+    r"[\w.-]*)=)[^&#\s]+", re.I)
+
+
 def _mask(text: str) -> str:
-    """Hide the home directory and proxy credentials before a report is shared."""
+    """Hide the home directory, proxy credentials and secret-looking link parameters before sharing."""
     text = re.sub(r"(://)[^/@\s]+:[^/@\s]+@", r"\1***:***@", text)
+    text = SECRET_QUERY.sub(r"\1***", text)
     home = str(Path.home())
     return text.replace(home, "~") if home and home != "/" else text
 

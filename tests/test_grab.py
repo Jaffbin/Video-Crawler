@@ -183,6 +183,13 @@ def test_report_masks_home_and_proxy_credentials():
     assert "Recent failure 1:" in text and "[INFO]" in text and "[OK]" in text
 
 
+def test_report_masks_secret_link_parameters_but_keeps_useful_ones():
+    link = "https://cdn.example.com/v.mp4?id=42&token=abc123&Signature=zz9&expire=99&apiKey=K1&v=keep#t=3"
+    text = grab.format_report([], [("Recent failure 1", [link])])
+    assert all(secret not in text for secret in ("abc123", "zz9", "=99", "K1"))
+    assert "id=42" in text and "v=keep" in text and "token=***" in text and "#t=3" in text
+
+
 def test_doctor_cli_exit_code(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(grab, "run_diagnostics", lambda *a, **k: [grab.check_item("x", "X", "error", "boom")])
     assert grab.doctor_cli(args_for(tmp_path, net=False)) == 1

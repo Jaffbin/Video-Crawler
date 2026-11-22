@@ -31,6 +31,7 @@ import json
 import logging
 import mimetypes
 import os
+import platform
 import queue
 import re
 import secrets
@@ -1665,6 +1666,46 @@ def open_hooks_config() -> dict:
 
 
 # ───────────────────────── Diagnostics ─────────────────────────
+def library_data_check() -> dict:
+    """Diagnostics row for the library database and its JSON copy (see SqliteLibraryStore.check)."""
+    try:
+        with LIBRARY.lock:
+            report = LIBRARY.store.check()
+    except OSError as error:
+        return grab.check_item("library_data", "Library data", "warn", f"Could not check the library data: {error}")
+    summary = (f"database {report['database']}, saved copy {report['mirror']}, "
+               f"{'in sync' if report['in_sync'] else 'not compared' if report['in_sync'] is None else 'out of sync'}, "
+               f"{report['records']} records.")
+    if report["action"] == "rebuild_database":
+        return grab.check_item("library_data", "Library data", "warn",
+                               "The library database cannot be read, so the last saved copy is shown and changes "
+                               "cannot be saved: " + summary,
+                               fix="Use Check library data below to rebuild the database. The damaged file is kept.")
+    if report["action"] == "rewrite_mirror":
+        return grab.check_item("library_data", "Library data", "warn", summary,
+                               fix="Use Check library data below to rewrite the saved copy.")
+    if report["database"] == "damaged":
+        return grab.check_item("library_data", "Library data", "error", summary,
+                               fix="Both copies are damaged. Restore a backup in Backup and restore.")
+    return grab.check_item("library_data", "Library data", "ok", summary)
+
+
+def environment_lines() -> list[str]:
+    """Versions and feature switches for a shared report; never addresses, tokens or paths."""
+    try:
+        version = importlib.metadata.version("video-grabber-local")
+    except importlib.metadata.PackageNotFoundError:
+        version = "source checkout"
+    def switch(on: bool) -> str:
+        return "on" if on else "off"
+
+    return [f"Video Grabber {version} ({'portable' if os.environ.get('VIDEO_GRABBER_PORTABLE_ROOT') else 'from source'})",
+            f"Python {sys.version.split()[0]} on {platform.system()} {platform.release()} ({platform.machine()})",
+            f"Interface: {UI_MODE}; download workers: {WORKERS}",
+            f"Automation API: {switch(api_settings()['enabled'])}; remote access: {switch(remote_settings()['enabled'])}; "
+            f"Chrome extension access: {switch(extension_access_enabled())}"]
+
+
 def collect_doctor(net: bool = False, force: bool = False) -> dict:
     if not net and not force and DOCTOR_CACHE["data"] and time.time() - DOCTOR_CACHE["ts"] < 15:
         return DOCTOR_CACHE["data"]
@@ -1701,11 +1742,7 @@ def collect_doctor(net: bool = False, force: bool = False) -> dict:
     else:
         checks.append(grab.check_item("pywebview", "Desktop window (pywebview)", "info",
                                       "Not installed. Optional: only needed for --ui window.", fix="pip install pywebview"))
-    if LIBRARY.store.state.get("problem") == "database_unreadable":
-        checks.append(grab.check_item(
-            "library_data", "Library data", "warn",
-            "The library database cannot be read, so the last saved copy is shown and changes cannot be saved.",
-            fix="Use Check library data below to rebuild the database. The damaged file is kept."))
+    checks.append(library_data_check())
     subscriptions = SUBSCRIPTION_MANAGER.snapshot()
     active = sum(1 for subscription in subscriptions if subscription.enabled)
     total = len(subscriptions)
@@ -1714,8 +1751,9 @@ def collect_doctor(net: bool = False, force: bool = False) -> dict:
                                       f"{active} of {total} active, checked every {SUB_INTERVAL_SECONDS // 60} minutes."))
     failures = sorted((job for job in JOB_MANAGER.snapshot() if job.status == "error"),
                       key=lambda j: j.finished or j.created, reverse=True)[:3]
-    sections = [(f"Recent failure {i}", [j.url, f"Error: {j.error}"] + [ln[:200] for ln in list(j.log)[-12:]])
-                for i, j in enumerate(failures, 1)]
+    sections = [("Environment", environment_lines())]
+    sections += [(f"Recent failure {i}", [j.url, f"Error: {j.error}"] + [ln[:200] for ln in list(j.log)[-12:]])
+                 for i, j in enumerate(failures, 1)]
     data = {"checks": checks, "report": grab.format_report(checks, sections), "net": net}
     if not net:
         DOCTOR_CACHE.update(ts=time.time(), data=data)

@@ -72,6 +72,12 @@ Tests must not contact production accounts or require private cookies. Prefer lo
 mocked extractor responses. When reporting a site failure, include a redacted Diagnostics report and
 the public URL only when it is safe to share.
 
+**Settings and help → Diagnostics → Copy report** gives app, Python and OS versions, component checks,
+the library data check, which features are on (not their addresses or tokens) and the last three
+failures with their log lines. It replaces your home folder with `~`, hides proxy passwords and the
+values of link parameters such as `token`, `key`, `signature` and `expires`. Video titles, file
+names and other links stay in, so read it before sharing.
+
 ## Portable build
 
 On Windows, `scripts\build_portable.ps1` downloads the pinned official CPython embeddable archive,

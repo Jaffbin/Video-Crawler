@@ -150,3 +150,15 @@ def test_the_check_and_repair_routes_need_the_app_page(tmp_path):
         srv.shutdown()
         srv.server_close()
         webui.LIBRARY.store.state.clear()
+
+
+def test_the_shared_report_names_versions_and_switches_but_no_secrets():
+    webui.change_api_settings("enable")
+    token = webui.change_api_settings("new_token")["token"]
+    make_library(webui.ROOT)
+    doctor = webui.collect_doctor(force=True)
+    report = doctor["report"]
+    assert "Environment:" in report and "Python " in report and "Automation API: on" in report
+    assert "remote access: off" in report and token not in report
+    row = next(check for check in doctor["checks"] if check["id"] == "library_data")
+    assert row["status"] == "ok" and "in sync, 1 records" in row["detail"]
