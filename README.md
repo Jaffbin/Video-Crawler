@@ -149,8 +149,9 @@ download components, not these optional desktop dependencies.
 New download includes four output presets and supports named custom presets. Presets change only
 format, quality, subtitles and covers; applying one never starts a task. **Settings and help →
 Backup and restore** exports safe preferences and Library organization as JSON. Restore previews
-changes, preserves current conflicting values and matches media by relative path and size. Media,
-queues, subscriptions, sign-in data and proxy settings are excluded; copy media separately.
+changes, preserves current conflicting values and matches media by relative path and size.
+Subscriptions are included as links, formats and filters and restore without back-filling old
+videos. Media, queues, sign-in data and proxy settings are excluded; copy media separately.
 
 The optional [Chrome extension](browser-extension/README.md) sends the current video or music page
 through its toolbar, **Alt+Shift+V**, or an explicit page/link right-click action. Every entry opens

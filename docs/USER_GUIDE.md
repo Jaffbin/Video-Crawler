@@ -60,9 +60,10 @@ Chrome extension retain their existing separate workflows.
 
 Open **Settings and help → Backup and restore** to export one JSON file (up to 16 MiB). It contains
 output preferences, custom presets, theme/language, desktop notification and close preferences, and
-Library favorites, collections, tags, notes and playback progress. Downloaded media, thumbnails,
-subtitles, download queues/history, audio playback queues, subscriptions, source URLs, login data
-and proxy information are excluded.
+Library favorites, collections, tags, notes and playback progress, and subscriptions (link, title,
+format, filters and on/off switches). Downloaded media, thumbnails, subtitles, download
+queues/history, audio playback queues, source URLs of downloaded media, login data and proxy
+information are excluded. Subscription links are kept, so treat a backup as private.
 Keep a separate copy of media with the same paths relative to the library root; a backup of these
 annotations does not recreate media. Backup files can contain personal filenames and notes.
 The desktop window opens a native save dialog for exports; a browser uses its download settings.
@@ -77,6 +78,9 @@ Only missing settings are filled. Therefore a restored setting may intentionally
 appearance unchanged. Library records match by relative path and byte size, not content hash;
 missing, inaccessible or differently sized files are listed and skipped. Copy the matching media
 first and import again to restore those records. Recovery contents are excluded.
+Subscriptions are matched by link: one you already have keeps its current settings. A restored
+subscription starts like a new one and downloads only videos published after the restore, not the
+channel's back catalogue. Earlier app versions ignore subscriptions in a backup.
 
 Restoring does not change the save folder, move media, alter active jobs or create subscriptions.
 If relevant data changes after the preview, preview again before applying it. Metadata/settings

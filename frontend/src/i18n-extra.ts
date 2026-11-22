@@ -368,6 +368,11 @@ export const extraMessages: Record<string, [string, string, string]> = {
   'Save smart collection': ['保存智能合集', '儲存智慧合集', 'スマートコレクションを保存'],
   'Create smart collection': ['创建智能合集', '建立智慧合集', 'スマートコレクションを作成'],
   'Clear rules': ['清空规则', '清除規則', '条件をクリア'],
+  '{count} subscriptions will be added. They download only videos published from now on.': [
+    '将添加 {count} 个订阅。它们只下载从现在起发布的视频。',
+    '將新增 {count} 個訂閱。它們只下載從現在起發布的影片。',
+    '{count} 件の購読を追加します。今後公開される動画だけをダウンロードします。',
+  ],
   '{count} auto rules will be added.': [
     '将添加 {count} 条自动规则。',
     '將新增 {count} 條自動規則。',
@@ -471,11 +476,11 @@ export const extraMessages: Record<string, [string, string, string]> = {
     '備份下載偏好、自訂預設、收藏、合集、標籤、備註和播放進度。',
     '設定、独自プリセット、お気に入り、コレクション、タグ、メモ、再生位置を保存します。',
   ],
-  'Media files, queues, subscriptions, sign-in data and proxy information are excluded. Save media separately with the same folder structure.':
+  'Subscriptions are kept as links, formats and filters. Media files, queues, sign-in data and proxy information are excluded. Save media separately with the same folder structure.':
     [
-      '不包含媒体文件、队列、订阅、登录资料及代理信息。媒体请按原文件夹结构另行保存。',
-      '不包含媒體檔案、佇列、訂閱、登入資料及代理資訊。媒體請按原資料夾結構另行儲存。',
-      'メディア、キュー、購読、ログイン情報、プロキシ情報は含みません。メディアは同じフォルダー構成で別途保存してください。',
+      '订阅会以链接、格式和过滤条件保存。不包含媒体文件、队列、登录资料及代理信息。媒体请按原文件夹结构另行保存。',
+      '訂閱會以連結、格式和篩選條件儲存。不包含媒體檔案、佇列、登入資料及代理資訊。媒體請按原資料夾結構另行儲存。',
+      '購読はリンク、形式、フィルターとして保存します。メディア、キュー、ログイン情報、プロキシ情報は含みません。メディアは同じフォルダー構成で別途保存してください。',
     ],
   'Backup file prepared. Keep it with a separate copy of your media.': [
     '已生成备份文件，请同时另行保存媒体文件。',

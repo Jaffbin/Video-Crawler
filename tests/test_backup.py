@@ -296,3 +296,89 @@ def test_invalid_auto_rule_backups_are_rejected(value):
     backup["library"]["auto_rules"] = value
     with pytest.raises(ValueError):
         document(backup)
+
+
+# ── Subscriptions ──
+def live_subscription(url="https://example.com/channel", **changes):
+    sub = webui.Subscription(url, {"mode": "mp3", "abr": 320, "proxy": "http://secret-proxy:1",
+                                   "cookies_from_browser": "chrome", "referer": "https://private-referer"},
+                             "recent", 5, {"include_keywords": ["talk"], "max_duration": 600})
+    sub.title = "My channel"
+    sub.seen_ids = {"seen-1", "seen-2"}
+    sub.initialized = True
+    sub.export_media = True
+    for key, value in changes.items():
+        setattr(sub, key, value)
+    return sub
+
+
+def test_subscriptions_export_without_sign_in_proxy_or_history():
+    exported = service().export({}, subscriptions=[live_subscription().to_dict()])
+    serialized = json.dumps(exported)
+    assert all(secret not in serialized for secret in ("secret-proxy", "chrome", "private-referer", "seen-1"))
+    assert exported["subscriptions"] == [{
+        "url": "https://example.com/channel", "title": "My channel", "options": {"mode": "mp3", "abr": 320},
+        "filters": webui.normalize_subscription_filters({"include_keywords": ["talk"], "max_duration": 600}),
+        "enabled": True, "export_media": True}]
+    assert document(exported)["subscriptions"] == exported["subscriptions"]
+
+
+def test_restored_subscriptions_start_fresh_and_existing_links_win(server, monkeypatch):
+    monkeypatch.setattr(webui, "WINDOW_MODE", False)
+    monkeypatch.setattr(webui, "start_subscription_check", lambda sub: None)
+    backup = service().export({}, subscriptions=[
+        live_subscription().to_dict(), live_subscription("https://example.com/kept", enabled=False).to_dict()])
+    existing = webui.Subscription("https://example.com/kept", {"mode": "mp4"})
+    webui.SUBSCRIPTION_MANAGER.add(existing)
+    status, review = call(server, "/api/backup/preview", {"backup": backup, "current": {}})
+    assert status == 200 and review["counts"]["subscriptions"] == 1
+    status, _ = call(server, "/api/backup/restore", {"backup": backup, "current": {},
+                                                      "review_token": review["review_token"]})
+    assert status == 200
+    subs = {sub.url: sub for sub in webui.SUBSCRIPTION_MANAGER.snapshot()}
+    assert subs["https://example.com/kept"] is existing and existing.options == {"mode": "mp4"}
+    restored = subs["https://example.com/channel"]
+    assert restored.options == {"mode": "mp3", "abr": 320} and restored.title == "My channel"
+    assert restored.filters["include_keywords"] == ["talk"] and restored.export_media is True
+    # A restored subscription behaves like a new one: nothing seen yet, no back-fill of old uploads.
+    assert restored.seen_ids == set() and restored.initialized is False and restored.backfill == "none"
+    saved = json.loads(webui.SUBSCRIPTIONS_STORE.path().read_text(encoding="utf-8"))
+    assert {item["url"] for item in saved["subscriptions"]} == set(subs)
+    # Restoring the same backup again adds nothing.
+    review = call(server, "/api/backup/preview", {"backup": backup, "current": {}})[1]
+    assert review["counts"]["subscriptions"] == 0
+
+
+def test_adding_a_backed_up_link_after_preview_invalidates_it():
+    backup = service().export({}, subscriptions=[live_subscription().to_dict()])
+    api = service()
+    review = api.preview(backup, {}, [])
+    # An unrelated subscription does not change what the restore would add.
+    assert api.restore(backup, {}, review["review_token"], ["https://example.com/other"])[1]
+    review = api.preview(backup, {}, [])
+    with pytest.raises(ValueError, match="changed since preview"):
+        api.restore(backup, {}, review["review_token"], ["https://example.com/channel"])
+
+
+@pytest.mark.parametrize("value", [
+    "not a list",
+    [{"url": "ftp://example.com/x"}],
+    [{"url": "javascript:alert(1)"}],
+    [{"url": "https://example.com/a"}, {"url": "https://example.com/a"}],
+    [{"url": "https://example.com/a", "options": {"mode": "image"}}],
+    [{"url": "https://example.com/a", "options": {"proxy": "http://x"}, "filters": {"include_keywords": "x" * 999}}],
+    [{"url": "https://example.com/a", "enabled": "yes"}],
+    [{"url": "https://example.com/a", "title": "bad\x00title"}],
+    [{"url": f"https://example.com/{i}"} for i in range(grab_backup.SUBSCRIPTION_LIMIT + 1)],
+])
+def test_invalid_subscription_backups_are_rejected(value):
+    backup = source()
+    backup["subscriptions"] = value
+    with pytest.raises(ValueError):
+        document(backup)
+
+
+def test_older_backups_without_subscriptions_still_restore():
+    backup = source()
+    assert "subscriptions" not in backup
+    assert document(backup)["subscriptions"] == []

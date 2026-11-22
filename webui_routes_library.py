@@ -276,22 +276,44 @@ def library_import(app, h, q: dict):
         app.FOLDER_PICK_LOCK.release()
 
 
+def restore_subscriptions(app, records: list[dict]) -> None:
+    """Add restored subscriptions as new ones: no back-fill, so only later uploads download."""
+    existing = {subscription.url for subscription in app.SUBSCRIPTION_MANAGER.snapshot()}
+    added = False
+    for record in records:
+        if record["url"] in existing:  # added by hand between preview and restore
+            continue
+        subscription = app.Subscription(record["url"], record["options"], "none", 5, record["filters"])
+        subscription.title = record["title"]
+        subscription.enabled = record["enabled"]
+        subscription.export_media = record["export_media"]
+        app.SUBSCRIPTION_MANAGER.add(subscription)
+        existing.add(record["url"])
+        added = True
+    if added:
+        app.save_subscriptions()
+
+
 def backup_post(app, h, path: str, body: dict) -> bool:
     if path not in {"/api/backup/export", "/api/backup/preview", "/api/backup/restore"}:
         return False
     desktop = app.NATIVE_DESKTOP if app.WINDOW_MODE else None
     service = app.BackupService(app.LIBRARY, app.CONFIG_DIR / "desktop.json", desktop.preferences_lock if desktop else app.SETTINGS_LOCK)
+    subscriptions = app.SUBSCRIPTION_MANAGER.snapshot()
+    urls = [subscription.url for subscription in subscriptions]
     try:
         if path.endswith("/export"):
             defaults = {"close_behavior": desktop.close_behavior, "notifications_enabled": desktop.notifications_enabled} if desktop else None
-            h._json(service.export(body.get("preferences", {}), defaults))
+            h._json(service.export(body.get("preferences", {}), defaults,
+                                   [subscription.to_dict() for subscription in subscriptions]))
             return True
         if path.endswith("/preview"):
-            h._json(service.preview(body.get("backup"), body.get("current", {})))
+            h._json(service.preview(body.get("backup"), body.get("current", {}), urls))
             return True
-        result = service.restore(body.get("backup"), body.get("current", {}), body.get("review_token"))
+        result, added = service.restore(body.get("backup"), body.get("current", {}), body.get("review_token"), urls)
         if desktop:
             desktop.reload_preferences()
+        restore_subscriptions(app, added)
         app.bump_rev()
         h._json(result)
         return True

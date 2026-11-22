@@ -108,7 +108,7 @@ export function BackupModal({
         </p>
         <p className="text-xs text-zinc-400">
           {t(
-            'Media files, queues, subscriptions, sign-in data and proxy information are excluded. Save media separately with the same folder structure.',
+            'Subscriptions are kept as links, formats and filters. Media files, queues, sign-in data and proxy information are excluded. Save media separately with the same folder structure.',
           )}
         </p>
         <div className="flex flex-wrap gap-2">
@@ -175,6 +175,13 @@ export function BackupModal({
             )}
             {!!review.counts.auto_rules && (
               <p>{t('{count} auto rules will be added.', { count: review.counts.auto_rules })}</p>
+            )}
+            {!!review.counts.subscriptions && (
+              <p>
+                {t('{count} subscriptions will be added. They download only videos published from now on.', {
+                  count: review.counts.subscriptions,
+                })}
+              </p>
             )}
             <p>
               {t('{count} conflicting values will keep the current value.', {

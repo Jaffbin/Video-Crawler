@@ -15,7 +15,15 @@ it('previews an imported file without restoring until the user chooses to apply 
     restored = vi.fn(),
     user = userEvent.setup()
   const review = {
-    counts: { files: 1, collections: 2, auto_rules: 2, presets: 1, settings: 3, conflicts: 4 },
+    counts: {
+      files: 1,
+      collections: 2,
+      auto_rules: 2,
+      subscriptions: 3,
+      presets: 1,
+      settings: 3,
+      conflicts: 4,
+    },
     skipped: [{ path: 'missing.mp4', reason: 'missing' }],
     review_token: 'reviewed',
     browser: { theme: 'dark' },
@@ -35,6 +43,9 @@ it('previews an imported file without restoring until the user chooses to apply 
   const preview = await screen.findByRole('region', { name: 'Restore preview' })
   expect(preview).toHaveTextContent('missing.mp4')
   expect(preview).toHaveTextContent('2 auto rules will be added.')
+  expect(preview).toHaveTextContent(
+    '3 subscriptions will be added. They download only videos published from now on.',
+  )
   expect(calls).toEqual(['/api/backup/preview'])
   await user.click(screen.getByRole('button', { name: 'Restore missing data and merge' }))
   await waitFor(() => expect(restored).toHaveBeenCalledOnce())

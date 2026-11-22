@@ -13,6 +13,7 @@ export interface BackupReview {
     collections: number
     smart_collections?: number
     auto_rules?: number
+    subscriptions?: number
     presets: number
     settings: number
     conflicts: number

@@ -1,4 +1,9 @@
-"""Allowlisted portable annotations and preferences; media and credentials never enter backups."""
+"""Allowlisted portable annotations and preferences; media and credentials never enter backups.
+
+Subscriptions are kept as link, title, output choices, filters and switches only. Sign-in data,
+proxies, referers and the list of already-seen videos stay out, so a restored subscription starts
+like a new one and downloads only what is published afterwards.
+"""
 from __future__ import annotations
 
 import copy
@@ -16,9 +21,12 @@ import uuid
 from grab_storage import JsonStore
 import grab_auto_rules
 from grab_library import SMART_COLLECTION_LIMIT, smart_collection_records
+from grab_models import http_url, normalize_subscription_filters
 
 BACKUP_MAX_BYTES = 16 * 1024**2
 LOG = logging.getLogger(__name__)
+SUBSCRIPTION_LIMIT = 200
+SUBSCRIPTION_MODES = ("mp4", "mp3", "original")
 OUTPUT_DEFAULTS = {"mode": "mp4", "quality": "best", "abr": 192, "subs": False,
                    "sub_langs": "zh-Hans,zh-Hant,zh,en", "auto_subs": False, "embed_subs": False,
                    "cover": False, "keep_cover": False, "sponsorblock": "", "split_chapters": False}
@@ -54,6 +62,62 @@ def output_options(value):
             raise ValueError("Invalid download preferences.")
         result[key] = item
     return result
+
+
+def portable_output_options(value):
+    """The valid output choices of a live subscription; anything else (proxy, cookies) is dropped."""
+    result = {}
+    for key, item in (value.items() if isinstance(value, dict) else []):
+        try:
+            result.update(output_options({key: item}))
+        except ValueError:
+            continue
+    return result
+
+
+def subscription_records(value):
+    """Strictly validate backed-up subscriptions."""
+    if not isinstance(value, list) or len(value) > SUBSCRIPTION_LIMIT:
+        raise ValueError(f"A backup can contain up to {SUBSCRIPTION_LIMIT} subscriptions.")
+    result, urls = [], set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid subscription.")
+        url = item.get("url")
+        if not isinstance(url, str) or len(url) > 4096 or http_url(url) != url:
+            raise ValueError("A subscription has an invalid link.")
+        if url in urls:
+            raise ValueError("Duplicate subscription link in backup.")
+        urls.add(url)
+        options = output_options(item.get("options", {}))
+        if options.get("mode", "mp4") not in SUBSCRIPTION_MODES:
+            raise ValueError("Subscriptions support video and audio only.")
+        filters = item.get("filters", {})
+        if not isinstance(filters, dict) or normalize_subscription_filters(filters) != filters:
+            raise ValueError("A subscription has invalid filters.")
+        record = {"url": url, "title": checked_text(item.get("title", ""), 300).strip(), "options": options,
+                  "filters": filters}
+        for key, default in (("enabled", True), ("export_media", False)):
+            if not isinstance(item.get(key, default), bool):
+                raise ValueError("Invalid subscription switch.")
+            record[key] = item.get(key, default)
+        result.append(record)
+    return result
+
+
+def portable_subscription(value):
+    """A live subscription (Subscription.to_dict) as a backup record, or None if it cannot be kept."""
+    try:
+        options = portable_output_options(value.get("options"))
+        if options.get("mode", "mp4") not in SUBSCRIPTION_MODES:
+            options.pop("mode", None)
+        return subscription_records([{
+            "url": value.get("url"), "title": str(value.get("title") or "")[:300].strip(),
+            "options": options, "filters": normalize_subscription_filters(value.get("filters")),
+            "enabled": value.get("enabled") is not False, "export_media": value.get("export_media") is True,
+        }])[0]
+    except (AttributeError, ValueError):
+        return None
 
 
 def preferences(value):
@@ -164,8 +228,11 @@ def document(value):
         if any(key not in collections for key in info.get("collections", [])):
             raise ValueError("A media entry refers to an unknown collection.")
         files.append({"path": path, "size": item["size"], "annotations": info})
+    # Optional and additive: older backups have no subscriptions, and older versions ignore them.
+    subscriptions = subscription_records(value.get("subscriptions", []))
     return {"format": "video-grabber-backup", "version": 1, "preferences": browser, "desktop": desktop,
-            "library": {"files": files, "collections": collections, "smart_collections": smart, "auto_rules": rules}}
+            "library": {"files": files, "collections": collections, "smart_collections": smart, "auto_rules": rules},
+            "subscriptions": subscriptions}
 
 
 def auto_rule_records(value, collections):
@@ -245,7 +312,7 @@ class BackupService:
         self.desktop_store = JsonStore(lambda: desktop_path, preference_lock)
         self.preference_lock = preference_lock
 
-    def export(self, browser, desktop_defaults=None):
+    def export(self, browser, desktop_defaults=None, subscriptions=()):
         with self.library.lock, self.preference_lock:
             data = self.library.load()
             files = []
@@ -265,13 +332,15 @@ class BackupService:
                                "desktop": {**(desktop_defaults or {}), **desktop_preferences(desktop)},
                                "library": {"files": files, "collections": data["collections"],
                                            "smart_collections": data["smart_collections"],
-                                           "auto_rules": data["auto_rules"]}})
+                                           "auto_rules": data["auto_rules"]},
+                               "subscriptions": [record for record in map(portable_subscription, subscriptions)
+                                                 if record][:SUBSCRIPTION_LIMIT]})
             result["created_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             if len(encoded(result)) > BACKUP_MAX_BYTES:
                 raise ValueError("The backup exceeds the 16 MiB limit.")
             return result
 
-    def plan(self, backup, current):
+    def plan(self, backup, current, subscription_urls=()):
         source, current = document(backup), preferences(current)
         original = self.library.load()
         data, browser = copy.deepcopy(original), copy.deepcopy(current)
@@ -279,8 +348,8 @@ class BackupService:
         if not isinstance(saved_desktop, dict):
             raise ValueError("Current desktop settings are unreadable.")
         desktop = {**source["desktop"], **saved_desktop}
-        counts = {"files": 0, "collections": 0, "smart_collections": 0, "auto_rules": 0, "presets": 0, "settings": 0,
-                  "conflicts": 0}
+        counts = {"files": 0, "collections": 0, "smart_collections": 0, "auto_rules": 0, "subscriptions": 0,
+                  "presets": 0, "settings": 0, "conflicts": 0}
         for key in ("download", "theme", "locale"):
             if key not in source["preferences"]:
                 continue
@@ -351,6 +420,12 @@ class BackupService:
                 counts["auto_rules"] += 1
         if len(data["auto_rules"]) > grab_auto_rules.RULE_LIMIT:
             raise ValueError(f"Merging would exceed the {grab_auto_rules.RULE_LIMIT} auto rule limit.")
+        # Subscriptions merge by link: an existing one keeps its current settings and history.
+        existing_urls = set(subscription_urls)
+        added_subscriptions = [item for item in source["subscriptions"] if item["url"] not in existing_urls]
+        counts["subscriptions"] = len(added_subscriptions)
+        if len(existing_urls) + len(added_subscriptions) > SUBSCRIPTION_LIMIT:
+            raise ValueError(f"Merging would exceed the {SUBSCRIPTION_LIMIT} subscription limit.")
         skipped = []
         for item in source["library"]["files"]:
             try:
@@ -385,17 +460,20 @@ class BackupService:
             counts["files"] += record != before
         token = hashlib.sha256(encoded({"root": str(self.library.root().resolve()), "original": original,
                                        "saved_desktop": saved_desktop, "current": current, "source": source,
-                                       "data": data, "desktop": desktop, "browser": browser, "skipped": skipped})).hexdigest()
-        return {"counts": counts, "skipped": skipped, "review_token": token, "browser": browser}, data, desktop
+                                       "data": data, "desktop": desktop, "browser": browser, "skipped": skipped,
+                                       "subscriptions": added_subscriptions})).hexdigest()
+        review = {"counts": counts, "skipped": skipped, "review_token": token, "browser": browser}
+        return review, data, desktop, added_subscriptions
 
-    def preview(self, backup, current):
+    def preview(self, backup, current, subscription_urls=()):
         with self.library.lock, self.preference_lock:
-            return self.plan(backup, current)[0]
+            return self.plan(backup, current, subscription_urls)[0]
 
-    def restore(self, backup, current, token):
+    def restore(self, backup, current, token, subscription_urls=()):
+        """Publish the reviewed merge. Returns (review, new subscriptions for the caller to add)."""
         with self.library.lock, self.preference_lock:
-            review, data, desktop = self.plan(backup, current)
+            review, data, desktop, subscriptions = self.plan(backup, current, subscription_urls)
             if not isinstance(token, str) or token != review["review_token"]:
                 raise ValueError("Data changed since preview. Preview the backup again.")
             replace_documents([(self.library.store.path(), data), (self.desktop_store.path(), desktop)])
-            return review
+            return review, subscriptions
