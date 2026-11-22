@@ -15,7 +15,9 @@ dependencies = [
 [project.optional-dependencies]
 desktop = ["pywebview", "pystray>=0.19.5,<0.20", "Pillow>=10,<13", "windows-toasts>=1.3.1,<2; sys_platform == 'win32'"]
 render = ["playwright"]
-dev = ["pytest>=8,<10", "ruff>=0.14,<1"]
+# numpy and Pillow are only test dependencies here: transcription and cover tests use them, while
+# the app gets them from the ai and desktop extras.
+dev = ["pytest>=8,<10", "ruff>=0.14,<1", "numpy>=1.24,<3", "Pillow>=10,<13"]
 # Local speech-to-text for Library transcripts. Models download on first use.
 ai = ["faster-whisper>=1.1,<2"]
 # MCP server for AI agents (grab_mcp.py), a client of the local automation API.

@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -285,6 +286,10 @@ def test_reviewed_recycling_keeps_one_and_restores_companions_and_annotations(or
 
 @pytest.mark.parametrize("changed", ["replaced", "missing", "incomplete", "keeper_incomplete", "preserved_mtime"])
 def test_recycle_rechecks_every_group_member(organizer, changed):
+    if changed == "preserved_mtime" and sys.platform == "win32" and sys.version_info < (3, 12):
+        # Before Python 3.12, os.fstat on Windows reports creation time as st_ctime, so a same-size
+        # rewrite with its old mtime restored leaves no trace in any stat field.
+        pytest.skip("Windows reports file change times from Python 3.12")
     first = put(organizer, "a.mp4")
     keep = put(organizer, "b.mp4")
     state = scan(organizer)

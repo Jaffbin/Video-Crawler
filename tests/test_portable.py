@@ -231,7 +231,7 @@ def test_portable_build_ships_every_local_module_the_app_imports():
 
 def test_package_install_lists_every_local_module_the_app_imports():
     """A non-editable pip install only contains the modules named in pyproject.toml."""
-    import tomllib
+    tomllib = pytest.importorskip("tomllib", reason="tomllib needs Python 3.11 or later")
 
     root = Path(__file__).resolve().parent.parent
     local = {path.stem for path in root.glob("*.py")}
