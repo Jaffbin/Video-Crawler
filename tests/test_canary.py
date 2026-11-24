@@ -237,3 +237,22 @@ def test_routes_validate_test_settings_and_versions(server, monkeypatch):  # noq
         time.sleep(0.05)
     assert started == [("tested", "default"), ("install", "default", {"version": "2026.11.10"})]
     assert json.loads(json.dumps(webui.UPDATE))  # the status stays JSON for the Updates window
+
+
+def test_a_probe_that_loaded_another_version_is_inconclusive_not_a_pass(tmp_path):
+    """If the staged copy were not importable, the "new" side would quietly run the current one."""
+    current = fake_release(tmp_path, "2026.10.01")
+    not_staged = tmp_path / "empty-staging"
+    not_staged.mkdir()
+
+    def probe(url, paths, options):
+        return grab_canary.run_probe(url, [str(current)], options)  # both sides load the current release
+
+    results = grab_canary.compare([{"site": "Fine", "url": "https://fine.example/1"}], not_staged,
+                                  grab_canary.probe_options(), expected_version="2026.11.10", probe=probe)
+    assert results[0]["verdict"] == "inconclusive" and "instead of 2026.11.10" in results[0]["error"]
+    assert results[0]["new_version"] == "2026.10.01"
+    assert grab_canary.overall(results) == "untestable"
+    same = grab_canary.compare([{"site": "Fine", "url": "https://fine.example/1"}], not_staged,
+                               grab_canary.probe_options(), expected_version="2026.10.1", probe=probe)
+    assert same[0]["verdict"] == "fine"  # 2026.10.01 and 2026.10.1 are the same release

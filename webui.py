@@ -1138,7 +1138,8 @@ def _do_tested_update(extras: str = "default") -> None:
             probes += grab_canary.recent_probes(JOB_MANAGER.snapshot(newest_first=True))
         with UPDATE_LOCK:
             UPDATE.update(phase="probing", probes=[{"site": item["site"], "verdict": "testing"} for item in probes])
-        results = grab_canary.compare(probes, staging, grab_canary.probe_options(grab.js_runtime_opts()))
+        results = grab_canary.compare(probes, staging, grab_canary.probe_options(grab.js_runtime_opts()),
+                                      expected_version=target)
         outcome = grab_canary.overall(results)
         with UPDATE_LOCK:
             UPDATE.update(probes=[{key: item[key] for key in ("site", "current", "new", "verdict", "error")}

@@ -72,7 +72,7 @@ choice: it turns flaky single requests into a signal, without a server.
 
 ### 3. When it runs
 
-Only when the user starts an update, as part of that update (about 30-90 seconds of extra work,
+Only when the user starts an update, as part of that update (about 50 seconds of extra work in the measurement below,
 shown as **Downloading → Testing on N sites → Installing**). No background or scheduled updates are
 added by this decision. The existing rules still apply: no update while tasks are queued or running.
 
@@ -88,10 +88,10 @@ added by this decision. The existing rules still apply: no update while tasks ar
 ## Consequences
 
 - A regression on a probed site is caught before the user's downloads use the new version.
-- Updates take longer and use some bandwidth: metadata only, but sites such as YouTube still send a
-  web page and a player script per link (estimated at a few MB per link; to be measured).
-- Staging temporarily holds a second copy of yt-dlp and its dependencies (estimated at a few tens
-  of MB with curl-cffi; to be measured), removed afterwards.
+- Updates take longer (about 50 seconds in the measurement above) and use some bandwidth: metadata
+  only, but sites such as YouTube still send a web page and a player script per link.
+- Staging temporarily holds a second copy of yt-dlp and its dependencies (45 MB measured, with
+  curl-cffi), removed afterwards.
 - Built-in links need occasional maintenance; inconclusive links are surfaced rather than silently
   weakening the check.
 - Metadata success does not prove the download step works. **Go back** covers that gap.
@@ -127,8 +127,12 @@ added by this decision. The existing rules still apply: no update while tasks ar
    SoundCloud have no link whose licence could be verified the same way. Recent-site probes cover
    sites like Bilibili for users who opt in.
 
-Measured on the development machine: the three built-in links with both versions (six child
-processes, two at a time) took about 10 seconds.
+Measured on the development machine on 2026-11-24, updating 2026.8.19 to 2026.11.23 with the real
+pipeline (final install replaced by a recorder): checking PyPI 7-19 s, staging 25 s (9 s with pip's
+cache), probing the three links with both versions 18-20 s, about 50 s in total. The staging folder
+peaked at 45 MB and was removed. The child processes reported running 2026.08.19 and 2026.11.23
+respectively, and a probe that loads any other version than the one being tested now counts as
+inconclusive, so a staging problem cannot turn into a silent pass.
 
 ## Implementation outline
 

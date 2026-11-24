@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -124,8 +125,21 @@ def recent_probes(jobs, limit: int = RECENT_SITES_MAX) -> list[dict]:
     return result
 
 
-def compare(probes: list[dict], staged: Path, options: dict, *, progress=None, probe=run_probe) -> list[dict]:
-    """Probe each link with the current and the staged yt-dlp and return one result per link."""
+def same_version(first: str, second: str) -> bool:
+    """2026.08.19 and 2026.8.19 are the same release."""
+    def key(value: str) -> tuple:
+        return tuple(int(part) for part in re.findall(r"\d+", value or "")[:4])
+    return bool(key(first)) and key(first) == key(second)
+
+
+def compare(probes: list[dict], staged: Path, options: dict, *, expected_version: str | None = None,
+            progress=None, probe=run_probe) -> list[dict]:
+    """Probe each link with the current and the staged yt-dlp and return one result per link.
+
+    With expected_version, a "new" probe that loaded any other yt-dlp (for example because the
+    staged copy was not importable) is inconclusive instead of silently comparing a version with
+    itself.
+    """
     tasks = [(item, side) for item in probes for side in ("current", "new")]
     outcomes: dict[tuple[str, str], dict] = {}
 
@@ -142,9 +156,13 @@ def compare(probes: list[dict], staged: Path, options: dict, *, progress=None, p
     results = []
     for item in probes:
         current, new = outcomes[(item["url"], "current")], outcomes[(item["url"], "new")]
-        results.append({"site": item["site"], "url": item["url"], "current": current["ok"], "new": new["ok"],
-                        "verdict": verdict(current["ok"], new["ok"]),
-                        "error": new["error"] if not new["ok"] else ""})
+        result = {"site": item["site"], "url": item["url"], "current": current["ok"], "new": new["ok"],
+                  "current_version": current["version"], "new_version": new["version"],
+                  "verdict": verdict(current["ok"], new["ok"]), "error": new["error"] if not new["ok"] else ""}
+        if expected_version and new["version"] and not same_version(new["version"], expected_version):
+            result.update(verdict="inconclusive",
+                          error=f"The check ran yt-dlp {new['version']} instead of {expected_version}.")
+        results.append(result)
     return results
 
 
